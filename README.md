@@ -203,6 +203,8 @@ zotpilot config set formula_ocr_simpletex_app_secret <your-app-secret>
 
 默认 endpoint 是标准版 `https://server.simpletex.net/api/latex_ocr`，并按标准版限流预设 `formula_ocr_simpletex_min_interval=0.55` 与 `formula_ocr_simpletex_max_retries=2`；如需更快的轻量版，可设置 `formula_ocr_simpletex_endpoint` 为 `https://server.simpletex.net/api/latex_ocr_turbo`，并按你的配额调整最小请求间隔。inline math、纯图片 / 矢量公式和整页 fallback 仍留到后续阶段。
 
+回填前可以先做只读估算：agent 可调用 `estimate_formula_backfill`，命令行可运行 `zotpilot estimate-formula-backfill --limit 20`（加 `--json` 可输出完整结构）。估算只跑本地候选检测，不写入索引，也不调用 OCR provider；返回预计候选数、provider 调用数、SimpleTex 外部调用数、按当前请求间隔估算的最短耗时，以及便于 agent / GUI 直接展示的 `summary.next_action` 和 `summary.warnings`。
+
 </details>
 
 <details>

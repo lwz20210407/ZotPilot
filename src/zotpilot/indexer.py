@@ -93,6 +93,60 @@ def _progress_counts(counts: dict) -> dict[str, object]:
     return payload
 
 
+def _format_estimated_duration(seconds: float) -> str:
+    """Return a compact human-readable duration for planning output."""
+    seconds = max(float(seconds), 0.0)
+    if seconds < 60:
+        return f"{round(seconds, 1):g}s"
+    total_seconds = int(round(seconds))
+    minutes, remaining_seconds = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds}s"
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{hours}h {remaining_minutes}m"
+
+
+def _formula_backfill_next_action(
+    *,
+    processed: int,
+    failed_papers: int,
+    candidate_count: int,
+    data_egress: bool,
+) -> str:
+    """Summarize the likely next step after a formula backfill estimate."""
+    if processed == 0:
+        return "No already-indexed PDFs matched this request; check the item filters or index papers first."
+    if failed_papers == processed:
+        return "Candidate detection failed for every matched PDF; inspect the per-paper errors before backfilling."
+    if candidate_count == 0:
+        return "No formula candidates were found; running index_formulas is unlikely to add formula chunks."
+    if failed_papers:
+        return "Some PDFs failed candidate detection; review the per-paper errors, then backfill the remaining papers."
+    if data_egress:
+        return "SimpleTex is configured; review the external-call estimate and endpoint before running index_formulas."
+    return "Local formula OCR is configured; run index_formulas when ready."
+
+
+def _formula_backfill_warnings(
+    *,
+    processed: int,
+    failed_papers: int,
+    candidate_count: int,
+    data_egress: bool,
+) -> list[str]:
+    """Collect concise caveats for formula backfill planning."""
+    warnings: list[str] = []
+    if processed == 0:
+        warnings.append("No already-indexed PDFs matched this request.")
+    if failed_papers:
+        warnings.append(f"{failed_papers} paper(s) failed local candidate detection.")
+    if candidate_count == 0:
+        warnings.append("No formula candidates were detected.")
+    if data_egress and candidate_count > 0:
+        warnings.append("SimpleTex will send formula crops to the configured HTTPS endpoint.")
+    return warnings
+
+
 class ConfigDriftError(RuntimeError):
     """Raised when the persisted index config hash differs from the current config.
 
@@ -249,18 +303,7 @@ class Indexer:
         self._ensure_formula_provider_available()
         self._assert_config_hash_current()
 
-        indexed_ids = self.store.get_indexed_doc_ids()
-        items = [
-            item for item in self.zotero.get_all_items_with_pdfs()
-            if item.item_key in indexed_ids and item.pdf_path and item.pdf_path.exists()
-        ]
-        if item_key:
-            items = [item for item in items if item.item_key == item_key]
-        if item_keys:
-            wanted = set(item_keys)
-            items = [item for item in items if item.item_key in wanted]
-        if limit:
-            items = items[:limit]
+        items = self._formula_backfill_items(item_key=item_key, item_keys=item_keys, limit=limit)
 
         results = []
         for item in items:
@@ -304,6 +347,116 @@ class Indexer:
             "formulas_indexed": sum(row["n_formulas"] for row in results),
             "results": results,
         }
+
+    def estimate_formula_backfill(
+        self,
+        *,
+        item_key: str | None = None,
+        item_keys: list[str] | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """Estimate formula OCR candidate volume for already-indexed documents.
+
+        The estimate runs only the local candidate detector. It does not call the
+        configured OCR provider and does not modify the vector store.
+        """
+        self._assert_config_hash_current()
+        from .feature_extraction.formula_ocr import extract_formula_candidates
+
+        provider_name = getattr(self.config, "formula_ocr_provider", "local")
+        min_interval = float(getattr(self.config, "formula_ocr_simpletex_min_interval", 0.55))
+        has_external_egress = provider_name == "simpletex"
+        items = self._formula_backfill_items(item_key=item_key, item_keys=item_keys, limit=limit)
+
+        results: list[dict[str, object]] = []
+        total_candidates = 0
+        failed_papers = 0
+        for item in items:
+            pdf_path = item.pdf_path
+            if pdf_path is None:
+                continue
+            try:
+                candidates = extract_formula_candidates(
+                    pdf_path,
+                    max_formulas_per_doc=self.config.formula_ocr_max_formulas_per_doc,
+                    max_formulas_per_page=self.config.formula_ocr_max_formulas_per_page,
+                    min_confidence=self.config.formula_ocr_min_confidence,
+                )
+                candidate_count = len(candidates)
+                error = ""
+            except Exception as exc:
+                candidate_count = 0
+                failed_papers += 1
+                error = type(exc).__name__
+            total_candidates += candidate_count
+            results.append({
+                "item_key": item.item_key,
+                "title": item.title,
+                "candidate_count": candidate_count,
+                "estimated_provider_calls": candidate_count,
+                "estimated_external_calls": candidate_count if has_external_egress else 0,
+                "error": error,
+            })
+
+        estimated_min_duration_seconds = total_candidates * min_interval if has_external_egress else 0.0
+        processed = len(results)
+        average_candidates_per_paper = round(total_candidates / processed, 2) if processed else 0.0
+        summary = {
+            "papers": processed,
+            "candidates": total_candidates,
+            "provider_calls": total_candidates,
+            "external_calls": total_candidates if has_external_egress else 0,
+            "average_candidates_per_paper": average_candidates_per_paper,
+            "estimated_min_duration": _format_estimated_duration(estimated_min_duration_seconds),
+            "data_egress": has_external_egress,
+            "warnings": _formula_backfill_warnings(
+                processed=processed,
+                failed_papers=failed_papers,
+                candidate_count=total_candidates,
+                data_egress=has_external_egress,
+            ),
+            "next_action": _formula_backfill_next_action(
+                processed=processed,
+                failed_papers=failed_papers,
+                candidate_count=total_candidates,
+                data_egress=has_external_egress,
+            ),
+        }
+        return {
+            "provider": provider_name,
+            "processed": processed,
+            "failed_papers": failed_papers,
+            "candidate_count": total_candidates,
+            "average_candidates_per_paper": average_candidates_per_paper,
+            "estimated_provider_calls": total_candidates,
+            "estimated_external_calls": total_candidates if has_external_egress else 0,
+            "estimated_min_duration_seconds": round(estimated_min_duration_seconds, 3),
+            "estimated_min_duration": summary["estimated_min_duration"],
+            "data_egress": has_external_egress,
+            "summary": summary,
+            "results": results,
+        }
+
+    def _formula_backfill_items(
+        self,
+        *,
+        item_key: str | None = None,
+        item_keys: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[ZoteroItem]:
+        indexed_ids = self.store.get_indexed_doc_ids()
+        items = [
+            item for item in self.zotero.get_all_items_with_pdfs()
+            if item.item_key in indexed_ids and item.pdf_path and item.pdf_path.exists()
+        ]
+        if item_key:
+            items = [item for item in items if item.item_key == item_key]
+        if item_keys:
+            wanted = set(item_keys)
+            items = [item for item in items if item.item_key in wanted]
+        if limit:
+            items = items[:limit]
+        return items
 
     def _count_existing_formulas(self, item_key: str) -> int:
         """Best-effort count of existing formula chunks for one document."""

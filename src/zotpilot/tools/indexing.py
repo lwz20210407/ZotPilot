@@ -427,6 +427,38 @@ def index_formulas(
         _index_lock.release()
 
 
+@mcp.tool(tags=tool_tags("extended", "indexing"))
+def estimate_formula_backfill(
+    item_key: Annotated[
+        str | None,
+        Field(description="Estimate formula OCR candidates for one Zotero item key"),
+    ] = None,
+    item_keys: Annotated[
+        list[str] | None,
+        BeforeValidator(_parse_json_string_list),
+        Field(description="Estimate formula OCR candidates for these Zotero item keys"),
+    ] = None,
+    limit: Annotated[int | None, Field(description="Max already-indexed papers to estimate", ge=1)] = None,
+) -> dict:
+    """Estimate formula OCR candidate volume for already-indexed papers without writing chunks."""
+    from ..indexer import ConfigDriftError, Indexer
+    from ..vector_store import IndexUnavailableError
+
+    item_keys = _parse_json_string_list(item_keys)
+    _config = _get_config()
+    errors = _config.validate()
+    if errors:
+        raise ToolError(f"Config errors: {'; '.join(errors)}")
+    try:
+        return Indexer(_config).estimate_formula_backfill(
+            item_key=item_key,
+            item_keys=item_keys,
+            limit=limit,
+        )
+    except (ConfigDriftError, IndexUnavailableError) as e:
+        raise ToolError(str(e)) from e
+
+
 @mcp.tool(tags=tool_tags("core", "indexing"))
 def get_index_stats(
     limit: Annotated[int, Field(description="Papers per page for the unindexed paper list", ge=0, le=200)] = 50,

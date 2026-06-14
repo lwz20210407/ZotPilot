@@ -846,6 +846,56 @@ def cmd_index(args):
     return 1 if result["failed"] > 0 and result["indexed"] == 0 else 0
 
 
+def cmd_estimate_formula_backfill(args):
+    """Estimate formula backfill volume without OCR calls or index writes."""
+    from .indexer import ConfigDriftError, Indexer
+    from .vector_store import IndexUnavailableError
+
+    config = resolve_runtime_config(args.config)
+    errors = config.validate()
+    blocking_errors, api_warnings = _split_validate_errors(errors)
+    if blocking_errors:
+        for e in blocking_errors:
+            print(f"Config error: {e}", file=sys.stderr)
+        return 1
+    for w in api_warnings:
+        print(f"Warning: {w} (configure with `zotpilot setup` or `zotpilot config set ...`)", file=sys.stderr)
+
+    item_keys = getattr(args, "item_keys", None)
+    try:
+        result = Indexer(config).estimate_formula_backfill(
+            item_key=getattr(args, "item_key", None),
+            item_keys=item_keys,
+            limit=getattr(args, "limit", None),
+        )
+    except (ConfigDriftError, IndexUnavailableError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    summary = result.get("summary", {})
+    print("Formula backfill estimate:")
+    print(f"  Provider:                  {result.get('provider', '')}")
+    print(f"  Papers:                    {result.get('processed', 0)}")
+    print(f"  Formula candidates:        {result.get('candidate_count', 0)}")
+    print(f"  Avg candidates / paper:    {result.get('average_candidates_per_paper', 0)}")
+    print(f"  Estimated provider calls:  {result.get('estimated_provider_calls', 0)}")
+    print(f"  Estimated external calls:  {result.get('estimated_external_calls', 0)}")
+    print(f"  Estimated minimum runtime: {result.get('estimated_min_duration', '0s')}")
+    print(f"  Data egress:               {'yes' if result.get('data_egress') else 'no'}")
+    if summary.get("next_action"):
+        print(f"\nNext: {summary['next_action']}")
+    warnings = summary.get("warnings") or []
+    if warnings:
+        print("\nWarnings:")
+        for warning in warnings:
+            print(f"  - {warning}")
+    return 0
+
+
 def cmd_status(args):
     """Show configuration and index stats."""
     from . import __version__
@@ -1839,6 +1889,23 @@ def main(argv: list[str] | None = None) -> int:
     sub_index.add_argument("--config", type=str, default=None, help="Config file path")
     sub_index.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     sub_index.set_defaults(func=cmd_index)
+
+    # estimate-formula-backfill
+    sub_formula_estimate = subparsers.add_parser(
+        "estimate-formula-backfill",
+        help="Estimate formula OCR backfill volume without writing the index",
+    )
+    sub_formula_estimate.add_argument("--item-key", type=str, default=None, help="Estimate one Zotero item key")
+    sub_formula_estimate.add_argument(
+        "--item-keys",
+        nargs="+",
+        default=None,
+        help="Estimate a space-separated list of Zotero item keys",
+    )
+    sub_formula_estimate.add_argument("--limit", type=int, default=None, help="Max already-indexed papers to scan")
+    sub_formula_estimate.add_argument("--json", action="store_true", help="Output the full estimate as JSON")
+    sub_formula_estimate.add_argument("--config", type=str, default=None, help="Config file path")
+    sub_formula_estimate.set_defaults(func=cmd_estimate_formula_backfill)
 
     # status
     sub_status = subparsers.add_parser("status", help="Show config and index stats")

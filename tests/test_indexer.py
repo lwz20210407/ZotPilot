@@ -219,6 +219,95 @@ class TestFormulaBackfill:
         indexer.store.delete_chunks_by_type.assert_not_called()
         indexer.store.add_formulas.assert_not_called()
 
+    def test_estimate_formula_backfill_counts_candidates_without_ocr(self, tmp_path):
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem(
+            item_key="DOC1",
+            title="Paper",
+            authors="Auth",
+            year=2024,
+            pdf_path=pdf_path,
+            citation_key="auth2024",
+            publication="Nature",
+        )
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(
+            **{
+                **self._hash_config().__dict__,
+                "formula_ocr_provider": "simpletex",
+                "formula_ocr_simpletex_min_interval": 0.55,
+            }
+        )
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer._assert_config_hash_current = MagicMock()
+        indexer._ensure_formula_provider_available = MagicMock()
+
+        with patch(
+            "zotpilot.feature_extraction.formula_ocr.extract_formula_candidates",
+            return_value=[object(), object()],
+        ):
+            result = indexer.estimate_formula_backfill()
+
+        assert result["provider"] == "simpletex"
+        assert result["processed"] == 1
+        assert result["candidate_count"] == 2
+        assert result["average_candidates_per_paper"] == 2.0
+        assert result["estimated_provider_calls"] == 2
+        assert result["estimated_external_calls"] == 2
+        assert result["estimated_min_duration_seconds"] == 1.1
+        assert result["estimated_min_duration"] == "1.1s"
+        assert result["data_egress"] is True
+        assert result["summary"] == {
+            "papers": 1,
+            "candidates": 2,
+            "provider_calls": 2,
+            "external_calls": 2,
+            "average_candidates_per_paper": 2.0,
+            "estimated_min_duration": "1.1s",
+            "data_egress": True,
+            "warnings": ["SimpleTex will send formula crops to the configured HTTPS endpoint."],
+            "next_action": (
+                "SimpleTex is configured; review the external-call estimate and endpoint "
+                "before running index_formulas."
+            ),
+        }
+        assert result["results"][0]["candidate_count"] == 2
+        indexer._assert_config_hash_current.assert_called_once()
+        indexer._ensure_formula_provider_available.assert_not_called()
+
+    def test_estimate_formula_backfill_summarizes_empty_selection(self):
+        from zotpilot.indexer import Indexer
+
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = set()
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = []
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates") as extract:
+            result = indexer.estimate_formula_backfill()
+
+        assert result["processed"] == 0
+        assert result["candidate_count"] == 0
+        assert result["estimated_min_duration"] == "0s"
+        assert result["summary"]["warnings"] == [
+            "No already-indexed PDFs matched this request.",
+            "No formula candidates were detected.",
+        ]
+        assert result["summary"]["next_action"] == (
+            "No already-indexed PDFs matched this request; check the item filters or index papers first."
+        )
+        extract.assert_not_called()
+
     def test_formula_failure_does_not_block_table_failure_cleanup(self, tmp_path):
         from zotpilot.index_authority import IndexJournal, mark_committed, record_table_failure
         from zotpilot.indexer import Indexer

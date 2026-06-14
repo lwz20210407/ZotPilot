@@ -201,6 +201,8 @@ zotpilot config set formula_ocr_simpletex_app_secret <your-app-secret>
 
 The default endpoint is the standard `https://server.simpletex.net/api/latex_ocr`, with `formula_ocr_simpletex_min_interval=0.55` and `formula_ocr_simpletex_max_retries=2` as the standard-endpoint throttle defaults. For the faster lightweight endpoint, set `formula_ocr_simpletex_endpoint` to `https://server.simpletex.net/api/latex_ocr_turbo` and tune the minimum request interval for your quota. Inline math, image/vector-only formulas, and full-page fallback are still left for later phases.
 
+Before backfilling, run a read-only estimate: agents can call `estimate_formula_backfill`, and CLI users can run `zotpilot estimate-formula-backfill --limit 20` (add `--json` for the full structured payload). The estimate runs only the local candidate detector, does not write to the index, and does not call the OCR provider; it returns estimated candidates, provider calls, SimpleTex external calls, the minimum duration implied by the current request interval, and `summary.next_action` / `summary.warnings` for agent or GUI display.
+
 </details>
 
 <details>
