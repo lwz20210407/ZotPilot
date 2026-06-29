@@ -131,6 +131,18 @@ def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
     return result
 
 
+def _print_json(data, *, indent: int | None = 2, ensure_ascii: bool = False) -> None:
+    """Print CLI JSON without crashing on narrow Windows stdout encodings."""
+    text = json.dumps(data, ensure_ascii=ensure_ascii, indent=indent)
+    try:
+        sys.stdout.write(text)
+        sys.stdout.write("\n")
+    except UnicodeEncodeError:
+        safe_text = json.dumps(data, ensure_ascii=True, indent=indent)
+        sys.stdout.write(safe_text)
+        sys.stdout.write("\n")
+
+
 def _import_register_secret_overrides(args, config_path: Path) -> bool:
     imported_any = False
     if getattr(args, "gemini_key", None):
@@ -1135,7 +1147,7 @@ def cmd_index_formulas(args):
             print(f"Error: {e}", file=sys.stderr)
             return 1
         if args.json:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            _print_json(result, ensure_ascii=False, indent=2)
             return _formula_estimate_exit_code(args, result)
         print("[dry-run] No formula chunks were written.")
         _print_formula_backfill_estimate(result, preview_limit=preview_limit)
@@ -1181,7 +1193,7 @@ def cmd_index_formulas(args):
         release_lease(lease)
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _print_json(result, ensure_ascii=False, indent=2)
         return _formula_backfill_exit_code(args, result)
 
     print("Formula backfill complete:")
@@ -1288,7 +1300,7 @@ def cmd_estimate_formula_backfill(args):
         return 1
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _print_json(result, ensure_ascii=False, indent=2)
         return _formula_estimate_exit_code(args, result)
 
     _print_formula_backfill_estimate(result, preview_limit=preview_limit)
@@ -1390,7 +1402,7 @@ def cmd_status(args):
         except Exception as e:
             result["errors"].append(f"Index error: {e}")
 
-        print(json.dumps(result, indent=2))
+        _print_json(result, indent=2)
         return 1 if blocking_errors else 0
 
     # Human-readable output

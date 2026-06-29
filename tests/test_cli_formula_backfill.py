@@ -1,9 +1,34 @@
 import json
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def test_print_json_falls_back_for_narrow_stdout(monkeypatch):
+    from zotpilot.cli import _print_json
+
+    class GbkOnlyStdout:
+        def __init__(self):
+            self.text = ""
+
+        def write(self, value):
+            value.encode("gbk")
+            self.text += value
+            return len(value)
+
+        def flush(self):
+            return None
+
+    fake_stdout = GbkOnlyStdout()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    _print_json({"title": "A® paper"}, ensure_ascii=False, indent=2)
+
+    assert "\\u00ae" in fake_stdout.text
+    assert json.loads(fake_stdout.text)["title"] == "A® paper"
 
 
 def test_estimate_formula_backfill_cli_ignores_simpletex_auth_for_read_only_estimate(capsys):
