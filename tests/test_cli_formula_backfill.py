@@ -51,6 +51,7 @@ def test_estimate_formula_backfill_cli_ignores_simpletex_auth_for_read_only_esti
                 page_max=None,
                 sample_size=None,
                 sample_seed=0,
+                exclude_item_keys=None,
                 fail_on_write_blocked=False,
                 fail_on_candidate_quality_blocked=False,
                 fail_on_unmatched=False,
@@ -77,6 +78,76 @@ def test_estimate_formula_backfill_cli_ignores_simpletex_auth_for_read_only_esti
         page_max=None,
         sample_size=None,
         sample_seed=0,
+        exclude_item_keys=None,
+    )
+
+
+def test_estimate_formula_backfill_cli_forwards_sample_exclude_keys(capsys):
+    from zotpilot.cli import cmd_estimate_formula_backfill
+
+    config = MagicMock()
+    config.validate.return_value = []
+    indexer = MagicMock()
+    indexer.estimate_formula_backfill.return_value = {
+        "provider": "simpletex",
+        "candidate_provider": "mineru_cache",
+        "processed": 2,
+        "candidate_count": 2,
+        "average_candidates_per_paper": 1.0,
+        "estimated_provider_calls": 0,
+        "estimated_external_calls": 0,
+        "estimated_min_duration": "0s",
+        "daily_call_budget": 0,
+        "estimated_runs": 1,
+        "data_egress": False,
+        "summary": {"next_action": "Review estimate.", "warnings": []},
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer),
+    ):
+        rc = cmd_estimate_formula_backfill(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=None,
+                limit=None,
+                resume_after=None,
+                daily_call_budget=0,
+                preview_candidates=0,
+                preview_all_candidates=False,
+                preview_chars=160,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                page_min=None,
+                page_max=None,
+                sample_size=2,
+                sample_seed=11,
+                exclude_item_keys=["DOC1", "DOC2"],
+                fail_on_write_blocked=False,
+                fail_on_candidate_quality_blocked=False,
+                fail_on_unmatched=False,
+                json=False,
+            )
+        )
+
+    assert rc == 0
+    capsys.readouterr()
+    indexer.estimate_formula_backfill.assert_called_once_with(
+        item_key=None,
+        item_keys=None,
+        limit=None,
+        resume_after=None,
+        daily_call_budget=0,
+        candidate_preview_limit=0,
+        candidate_preview_chars=160,
+        pdf_fallback_max_pages=None,
+        page_min=None,
+        page_max=None,
+        sample_size=2,
+        sample_seed=11,
+        exclude_item_keys=["DOC1", "DOC2"],
     )
 
 
@@ -949,6 +1020,7 @@ def test_index_formulas_cli_dry_run_uses_estimate_without_lease(tmp_path, capsys
         page_max=None,
         sample_size=None,
         sample_seed=0,
+        exclude_item_keys=None,
         include_high_density=True,
         allow_candidate_quality_warnings=True,
     )
@@ -1210,4 +1282,5 @@ def test_estimate_formula_backfill_cli_can_export_all_candidate_preview(capsys):
         page_max=None,
         sample_size=None,
         sample_seed=0,
+        exclude_item_keys=None,
     )

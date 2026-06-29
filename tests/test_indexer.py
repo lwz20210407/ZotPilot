@@ -1804,6 +1804,43 @@ class TestFormulaBackfill:
         assert result["summary"]["sample_size"] == 2
         assert result["summary"]["sample_seed"] == 0
 
+    def test_estimate_formula_backfill_excludes_seen_item_keys_from_sample(self, tmp_path):
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        items = []
+        for index in range(4):
+            pdf_path = tmp_path / f"paper-{index}.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4")
+            items.append(ZoteroItem(f"DOC{index}", f"Paper {index}", "Auth", 2024, pdf_path))
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(**self._hash_config().__dict__)
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {item.item_key for item in items}
+        indexer.zotero = MagicMock()
+        items_by_key = {item.item_key: item for item in items}
+        indexer.zotero.get_item.side_effect = lambda item_key: items_by_key.get(item_key)
+        indexer.zotero.resolve_original_pdf_path = MagicMock(return_value=None)
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch(
+            "zotpilot.feature_extraction.formula_ocr.extract_formula_candidates",
+            return_value=[object()],
+        ), patch("zotpilot.indexer.pdf_content_translation_risk_score", return_value=0.0):
+            result = indexer.estimate_formula_backfill(
+                sample_size=2,
+                sample_seed=0,
+                exclude_item_keys=["DOC0", "DOC1", "MISSING"],
+            )
+
+        result_keys = {row["item_key"] for row in result["results"]}
+        assert result_keys == {"DOC2", "DOC3"}
+        assert result["sampled_from"] == 2
+        assert result["sample_excluded_requested_key_count"] == 3
+        assert result["sample_excluded_indexed_key_count"] == 2
+        assert result["summary"]["sample_excluded_requested_key_count"] == 3
+        assert result["summary"]["sample_excluded_indexed_key_count"] == 2
+
     def test_estimate_formula_backfill_rejects_sample_with_explicit_item_keys(self, tmp_path):
         from zotpilot.indexer import Indexer
         from zotpilot.models import ZoteroItem
@@ -1821,6 +1858,24 @@ class TestFormulaBackfill:
 
         with pytest.raises(ValueError, match="without item_key or item_keys"):
             indexer.estimate_formula_backfill(item_keys=["DOC1"], sample_size=1)
+
+    def test_estimate_formula_backfill_rejects_exclude_without_sample(self, tmp_path):
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path)
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_item.return_value = item
+        indexer._assert_config_hash_current = MagicMock()
+
+        with pytest.raises(ValueError, match="exclude_item_keys can only be used with sample_size"):
+            indexer.estimate_formula_backfill(exclude_item_keys=["DOC1"])
 
     def test_estimate_formula_backfill_reports_unmatched_requested_item_keys(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
@@ -3654,6 +3709,7 @@ class TestFormulaBackfill:
             daily_call_budget=1800,
             sample_size=None,
             sample_seed=0,
+            exclude_item_keys=None,
             pdf_fallback_max_pages=0,
             page_min=None,
             page_max=None,

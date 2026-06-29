@@ -1082,6 +1082,7 @@ def cmd_index_formulas(args):
                     page_max=getattr(args, "page_max", None),
                     sample_size=getattr(args, "sample_size", None),
                     sample_seed=getattr(args, "sample_seed", 0),
+                    exclude_item_keys=getattr(args, "exclude_item_keys", None),
                     include_high_density=getattr(args, "include_high_density", False),
                     allow_candidate_quality_warnings=getattr(args, "allow_candidate_quality_warnings", False),
                 ),
@@ -1232,6 +1233,7 @@ def cmd_estimate_formula_backfill(args):
                 page_max=getattr(args, "page_max", None),
                 sample_size=getattr(args, "sample_size", None),
                 sample_seed=getattr(args, "sample_seed", 0),
+                exclude_item_keys=getattr(args, "exclude_item_keys", None),
             ),
             json_output=args.json,
         )
@@ -2439,6 +2441,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help="Seed for --sample-size so random validation batches are reproducible",
+    )
+    sub_formula_estimate.add_argument(
+        "--exclude-item-keys",
+        nargs="+",
+        default=None,
+        help="Exclude these Zotero item keys from --sample-size random validation",
     )
     sub_formula_estimate.add_argument(
         "--resume-after",

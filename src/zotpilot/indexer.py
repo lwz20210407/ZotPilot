@@ -2157,6 +2157,7 @@ class Indexer:
         page_max: int | None = None,
         sample_size: int | None = None,
         sample_seed: int = 0,
+        exclude_item_keys: list[str] | None = None,
         include_high_density: bool = False,
         allow_candidate_quality_warnings: bool = False,
     ) -> dict:
@@ -2195,6 +2196,9 @@ class Indexer:
             raise ValueError("sample_size must be >= 0")
         if effective_sample_size > 0 and (item_key or item_keys):
             raise ValueError("sample_size can only be used without item_key or item_keys")
+        sample_excluded_keys = set(dict.fromkeys(exclude_item_keys or []))
+        if sample_excluded_keys and effective_sample_size == 0:
+            raise ValueError("exclude_item_keys can only be used with sample_size")
         effective_sample_seed = int(sample_seed)
         effective_pdf_fallback_max_pages = (
             int(getattr(self.config, "formula_candidate_pdf_fallback_max_pages", 80) or 0)
@@ -2205,9 +2209,14 @@ class Indexer:
             raise ValueError("pdf_fallback_max_pages must be >= 0")
         if effective_sample_size > 0:
             indexed_keys = sorted(self.store.get_indexed_doc_ids())
+            indexed_key_set = set(indexed_keys)
             matched_keys = set(indexed_keys)
             resume_after_found = resume_after is None or resume_after in matched_keys
-            candidate_keys = indexed_keys
+            sample_excluded_indexed_key_count = len(indexed_key_set & sample_excluded_keys)
+            candidate_keys = [
+                key for key in indexed_keys
+                if key not in sample_excluded_keys
+            ]
             if resume_after:
                 candidate_keys = _keys_after_resume(candidate_keys, resume_after)
             if limit:
@@ -2237,6 +2246,7 @@ class Indexer:
                         break
             matched_count = len(indexed_keys)
         else:
+            sample_excluded_indexed_key_count = 0
             sampled_unresolved_key_count = 0
             matched_items = self._formula_backfill_candidate_items(
                 item_key=item_key,
@@ -2624,6 +2634,8 @@ class Indexer:
             "resume_after_found": resume_after_found,
             "sample_size": effective_sample_size,
             "sample_seed": effective_sample_seed,
+            "sample_excluded_requested_key_count": len(sample_excluded_keys),
+            "sample_excluded_indexed_key_count": sample_excluded_indexed_key_count,
             "sampled_from": sampled_from,
             "warnings": warnings,
             "next_action": next_action,
@@ -2679,6 +2691,8 @@ class Indexer:
             "resume_after_found": resume_after_found,
             "sample_size": effective_sample_size,
             "sample_seed": effective_sample_seed,
+            "sample_excluded_requested_key_count": len(sample_excluded_keys),
+            "sample_excluded_indexed_key_count": sample_excluded_indexed_key_count,
             "sampled_from": sampled_from,
             "sampled_unresolved_key_count": sampled_unresolved_key_count,
             "data_egress": has_external_egress,

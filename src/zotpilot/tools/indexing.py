@@ -552,6 +552,11 @@ def estimate_formula_backfill(
         int,
         Field(description="Seed for sample_size so random validation batches are reproducible"),
     ] = 0,
+    exclude_item_keys: Annotated[
+        list[str] | None,
+        BeforeValidator(_parse_json_string_list),
+        Field(description="Exclude these Zotero item keys from sample_size random validation"),
+    ] = None,
     cache_pdf_number_enrichment: Annotated[
         bool,
         Field(
@@ -591,6 +596,7 @@ def estimate_formula_backfill(
     from ..vector_store import IndexUnavailableError
 
     item_keys = _parse_json_string_list(item_keys)
+    exclude_item_keys = _parse_json_string_list(exclude_item_keys)
     _config = _with_formula_cache_pdf_number_enrichment(
         _get_config(),
         cache_pdf_number_enrichment,
@@ -611,6 +617,7 @@ def estimate_formula_backfill(
             daily_call_budget=daily_call_budget,
             sample_size=sample_size,
             sample_seed=sample_seed,
+            exclude_item_keys=exclude_item_keys,
             pdf_fallback_max_pages=pdf_fallback_max_pages,
             page_min=page_min,
             page_max=page_max,
