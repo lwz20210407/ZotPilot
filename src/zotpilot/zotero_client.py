@@ -61,7 +61,7 @@ def _normalize_arxiv_id_text(arxiv_id: str | None) -> str | None:
 _TRANSLATED_PDF_MARKER_RE = re.compile(
     r"(双语|对照|翻译|译文|全文翻译|中英|英中|"
     r"bilingual|translated|translation|dual[-_\s]?language|"
-    r"zh[-_\s]?en|en[-_\s]?zh|cn[-_\s]?en|en[-_\s]?cn)",
+    r"zh[-_\s]+en|en[-_\s]+zh|cn[-_\s]+en|en[-_\s]+cn)",
     re.IGNORECASE,
 )
 _WEAK_TRANSLATED_PLUGIN_FILENAME_RE = re.compile(

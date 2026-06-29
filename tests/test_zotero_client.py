@@ -15,6 +15,18 @@ from zotpilot.zotero_client import (
 )
 
 
+def test_translation_marker_does_not_match_zheng_author_name():
+    path = "Zheng 等 - 1996 - A ductile damage model-091499.pdf"
+
+    assert not is_likely_bilingual_or_translated_pdf(path)
+    assert has_translation_plugin_filename_shape(path)
+
+
+def test_translation_marker_matches_language_pair_with_separator():
+    assert is_likely_bilingual_or_translated_pdf("paper.zh-en.pdf")
+    assert is_likely_bilingual_or_translated_pdf("paper en_zh.pdf")
+
+
 @pytest.fixture
 def zotero_db(tmp_path):
     """Create a minimal Zotero SQLite database for testing."""
