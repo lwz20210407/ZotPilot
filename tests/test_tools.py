@@ -1,9 +1,48 @@
 """Tests for MCP tool functions (mock dependencies)."""
+from dataclasses import dataclass
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from zotpilot.state import ToolError
+
+
+def test_tools_formula_pdf_number_options_append_enables_enrichment():
+    from zotpilot.tools.indexing import _with_formula_pdf_number_options
+
+    config = SimpleNamespace()
+
+    updated = _with_formula_pdf_number_options(
+        config,
+        cache_pdf_number_enrichment=False,
+        append_missing_pdf_number_candidates=True,
+    )
+
+    assert updated is config
+    assert config.formula_candidate_cache_pdf_number_enrichment is True
+    assert config.formula_candidate_pdf_number_append_missing_candidates is True
+
+
+def test_tools_formula_pdf_number_options_preserves_config_append_for_dataclass():
+    from zotpilot.tools.indexing import _with_formula_pdf_number_options
+
+    @dataclass(frozen=True)
+    class RuntimeConfig:
+        formula_candidate_cache_pdf_number_enrichment: bool = False
+        formula_candidate_pdf_number_append_missing_candidates: bool = True
+
+    config = RuntimeConfig()
+
+    updated = _with_formula_pdf_number_options(
+        config,
+        cache_pdf_number_enrichment=True,
+        append_missing_pdf_number_candidates=False,
+    )
+
+    assert updated.formula_candidate_cache_pdf_number_enrichment is True
+    assert updated.formula_candidate_pdf_number_append_missing_candidates is True
+
 
 # ---------------------------------------------------------------------------
 # library.py tools

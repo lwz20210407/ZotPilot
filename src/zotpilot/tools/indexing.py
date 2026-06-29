@@ -79,11 +79,34 @@ def _merge_item_key_sources(
 
 def _with_formula_cache_pdf_number_enrichment(config: Any, enabled: bool) -> Any:
     """Return a runtime-only config with cache PDF number enrichment enabled."""
-    if not enabled:
+    return _with_formula_pdf_number_options(
+        config,
+        cache_pdf_number_enrichment=enabled,
+        append_missing_pdf_number_candidates=False,
+    )
+
+
+def _with_formula_pdf_number_options(
+    config: Any,
+    *,
+    cache_pdf_number_enrichment: bool,
+    append_missing_pdf_number_candidates: bool,
+) -> Any:
+    """Return a runtime-only config with requested PDF number scan options."""
+    if not cache_pdf_number_enrichment and not append_missing_pdf_number_candidates:
         return config
+    append_missing_enabled = append_missing_pdf_number_candidates or bool(
+        getattr(config, "formula_candidate_pdf_number_append_missing_candidates", False)
+    )
     if is_dataclass(config):
-        return replace(cast(Any, config), formula_candidate_cache_pdf_number_enrichment=True)
+        return replace(
+            cast(Any, config),
+            formula_candidate_cache_pdf_number_enrichment=True,
+            formula_candidate_pdf_number_append_missing_candidates=append_missing_enabled,
+        )
     setattr(config, "formula_candidate_cache_pdf_number_enrichment", True)
+    if append_missing_enabled:
+        setattr(config, "formula_candidate_pdf_number_append_missing_candidates", True)
     return config
 
 
@@ -480,6 +503,15 @@ def index_formulas(
             )
         ),
     ] = False,
+    append_missing_pdf_number_candidates: Annotated[
+        bool,
+        Field(
+            description=(
+                "After PDF number enrichment, add missing numbered PDF formula candidates for reviewed gaps; "
+                "also enables cache_pdf_number_enrichment and may increase OCR provider calls"
+            )
+        ),
+    ] = False,
     pdf_fallback_max_pages: Annotated[
         int | None,
         Field(
@@ -514,9 +546,10 @@ def index_formulas(
         from ..vector_store import EmbeddingDimensionMismatchError, IndexUnavailableError
 
         item_keys = _parse_json_string_list(item_keys)
-        _config = _with_formula_cache_pdf_number_enrichment(
+        _config = _with_formula_pdf_number_options(
             _get_config(),
-            cache_pdf_number_enrichment,
+            cache_pdf_number_enrichment=cache_pdf_number_enrichment,
+            append_missing_pdf_number_candidates=append_missing_pdf_number_candidates,
         )
         errors = _config.validate()
         if errors:
@@ -610,6 +643,15 @@ def estimate_formula_backfill(
             )
         ),
     ] = False,
+    append_missing_pdf_number_candidates: Annotated[
+        bool,
+        Field(
+            description=(
+                "After PDF number enrichment, add missing numbered PDF formula candidates for reviewed gaps; "
+                "also enables cache_pdf_number_enrichment and may increase estimated OCR provider calls"
+            )
+        ),
+    ] = False,
     pdf_fallback_max_pages: Annotated[
         int | None,
         Field(
@@ -644,9 +686,10 @@ def estimate_formula_backfill(
         _parse_json_string_list(exclude_item_keys),
         exclude_item_keys_file,
     )
-    _config = _with_formula_cache_pdf_number_enrichment(
+    _config = _with_formula_pdf_number_options(
         _get_config(),
-        cache_pdf_number_enrichment,
+        cache_pdf_number_enrichment=cache_pdf_number_enrichment,
+        append_missing_pdf_number_candidates=append_missing_pdf_number_candidates,
     )
     errors = _config.validate()
     blocking_errors = [

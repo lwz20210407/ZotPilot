@@ -45,14 +45,34 @@ def _split_validate_errors(errors: list[str]) -> tuple[list[str], list[str]]:
 
 def _with_formula_cache_pdf_number_enrichment(config, enabled: bool):
     """Return a runtime-only config with cache PDF number enrichment enabled."""
-    if not enabled:
+    return _with_formula_pdf_number_options(
+        config,
+        cache_pdf_number_enrichment=enabled,
+        append_missing_pdf_number_candidates=False,
+    )
+
+
+def _with_formula_pdf_number_options(
+    config,
+    *,
+    cache_pdf_number_enrichment: bool,
+    append_missing_pdf_number_candidates: bool,
+):
+    """Return a runtime-only config with requested PDF number scan options."""
+    if not cache_pdf_number_enrichment and not append_missing_pdf_number_candidates:
         return config
+    append_missing_enabled = append_missing_pdf_number_candidates or bool(
+        getattr(config, "formula_candidate_pdf_number_append_missing_candidates", False)
+    )
     if dataclasses.is_dataclass(config):
         return dataclasses.replace(
             config,
             formula_candidate_cache_pdf_number_enrichment=True,
+            formula_candidate_pdf_number_append_missing_candidates=append_missing_enabled,
         )
     setattr(config, "formula_candidate_cache_pdf_number_enrichment", True)
+    if append_missing_enabled:
+        setattr(config, "formula_candidate_pdf_number_append_missing_candidates", True)
     return config
 
 
@@ -1092,9 +1112,10 @@ def cmd_index_formulas(args):
     from .indexer import ConfigDriftError, FormulaProviderUnavailableError, Indexer
     from .vector_store import EmbeddingDimensionMismatchError, IndexUnavailableError
 
-    config = _with_formula_cache_pdf_number_enrichment(
+    config = _with_formula_pdf_number_options(
         resolve_runtime_config(args.config),
-        getattr(args, "cache_pdf_number_enrichment", False),
+        cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
+        append_missing_pdf_number_candidates=getattr(args, "append_missing_pdf_number_candidates", False),
     )
     errors = config.validate()
     if getattr(args, "dry_run", False):
@@ -1257,9 +1278,10 @@ def cmd_estimate_formula_backfill(args):
     from .indexer import ConfigDriftError, Indexer
     from .vector_store import IndexUnavailableError
 
-    config = _with_formula_cache_pdf_number_enrichment(
+    config = _with_formula_pdf_number_options(
         resolve_runtime_config(args.config),
-        getattr(args, "cache_pdf_number_enrichment", False),
+        cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
+        append_missing_pdf_number_candidates=getattr(args, "append_missing_pdf_number_candidates", False),
     )
     errors = config.validate()
     blocking_errors = [
@@ -2429,6 +2451,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     sub_index_formulas.add_argument(
+        "--append-missing-pdf-number-candidates",
+        action="store_true",
+        help=(
+            "After PDF number enrichment, add missing numbered PDF formula candidates for reviewed gaps; "
+            "also enables --cache-pdf-number-enrichment and may increase OCR provider calls"
+        ),
+    )
+    sub_index_formulas.add_argument(
         "--page-min",
         type=int,
         default=None,
@@ -2570,6 +2600,14 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Explicitly open PDFs to enrich equation numbers for cached LaTeX; "
             "off by default so cache hits do not scan PDFs"
+        ),
+    )
+    sub_formula_estimate.add_argument(
+        "--append-missing-pdf-number-candidates",
+        action="store_true",
+        help=(
+            "After PDF number enrichment, add missing numbered PDF formula candidates for reviewed gaps; "
+            "also enables --cache-pdf-number-enrichment and may increase estimated OCR provider calls"
         ),
     )
     sub_formula_estimate.add_argument(
