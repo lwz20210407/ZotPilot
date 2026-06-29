@@ -2282,6 +2282,25 @@ class TestFormulaBackfill:
 
         assert result["candidate_quality_blocking_paper_count"] == 1
         assert result["summary"]["candidate_quality_blocking_paper_count"] == 1
+        assert result["candidate_quality_blocking_reason_counts"] == {
+            "missing_equation_number_gap": 1
+        }
+        assert result["summary"]["candidate_quality_blocking_reason_counts"] == {
+            "missing_equation_number_gap": 1
+        }
+        assert result["candidate_quality_blocking_source_totals"] == {
+            "candidate_count": 3,
+            "truncated_source_count": 0,
+            "cached_latex_missing_equation_number_count": 0,
+            "cached_latex_low_quality_count": 0,
+            "text_layer_candidate_count": 0,
+            "structured_cache_candidate_count": 3,
+            "ocr_needed_count": 0,
+            "paper_count": 1,
+        }
+        assert result["summary"]["candidate_quality_blocking_source_totals"] == (
+            result["candidate_quality_blocking_source_totals"]
+        )
         assert result["candidate_quality_blocking_papers"] == [
             {
                 "item_key": "DOC1",

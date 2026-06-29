@@ -1132,6 +1132,48 @@ def _formula_candidate_quality_blocking_row(
     return row
 
 
+def _int_metadata_value(value: object) -> int:
+    """Return integer metadata values without accepting arbitrary strings."""
+    return value if isinstance(value, int) else 0
+
+
+def _formula_candidate_quality_reason_counts(
+    rows: list[dict[str, object]],
+) -> dict[str, int]:
+    """Count candidate-stage blocking reasons across estimate rows."""
+    counts: Counter[str] = Counter()
+    for row in rows:
+        review_reasons = row.get("review_reasons", [])
+        if not isinstance(review_reasons, list):
+            continue
+        counts.update(
+            reason for reason in review_reasons
+            if isinstance(reason, str)
+        )
+    return dict(sorted(counts.items()))
+
+
+def _formula_candidate_quality_source_totals(
+    rows: list[dict[str, object]],
+) -> dict[str, int]:
+    """Summarize source/risk counters for candidate-stage blocking rows."""
+    fields = [
+        "candidate_count",
+        "truncated_source_count",
+        "cached_latex_missing_equation_number_count",
+        "cached_latex_low_quality_count",
+        "text_layer_candidate_count",
+        "structured_cache_candidate_count",
+        "ocr_needed_count",
+    ]
+    totals = {field: 0 for field in fields}
+    totals["paper_count"] = len(rows)
+    for row in rows:
+        for field in fields:
+            totals[field] += _int_metadata_value(row.get(field, 0))
+    return totals
+
+
 def _structural_formula_review_reasons(review_rows: list[dict[str, object]]) -> list[str]:
     """Return structural review reasons that should block formula index writes."""
     reasons: set[str] = set()
@@ -2493,6 +2535,12 @@ class Indexer:
                 "Review the high-density formula page-window plan before writing formulas; "
                 "prefer cached LaTeX or explicit page-window backfill instead of a full-document OCR run."
             )
+        candidate_quality_blocking_reason_counts = _formula_candidate_quality_reason_counts(
+            candidate_quality_blocking_papers
+        )
+        candidate_quality_blocking_source_totals = _formula_candidate_quality_source_totals(
+            candidate_quality_blocking_papers
+        )
         summary = {
             "papers": processed,
             "selected": selected,
@@ -2532,6 +2580,8 @@ class Indexer:
             "truncated_candidate_paper_count": len(truncated_candidate_papers),
             "cached_latex_missing_number_paper_count": len(cached_latex_missing_number_papers),
             "candidate_quality_blocking_paper_count": len(candidate_quality_blocking_papers),
+            "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
+            "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "request_complete": request_complete,
             "resume_after_found": resume_after_found,
@@ -2584,6 +2634,8 @@ class Indexer:
             "cached_latex_missing_number_papers": cached_latex_missing_number_papers,
             "candidate_quality_blocking_papers": candidate_quality_blocking_papers,
             "candidate_quality_blocking_paper_count": len(candidate_quality_blocking_papers),
+            "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
+            "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "unmatched_requested_item_keys": unmatched_requested_item_keys,
             "request_complete": request_complete,
