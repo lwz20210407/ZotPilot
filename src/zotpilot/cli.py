@@ -56,6 +56,46 @@ def _with_formula_cache_pdf_number_enrichment(config, enabled: bool):
     return config
 
 
+def _parse_item_key_text(text: str) -> list[str]:
+    """Parse Zotero item keys from JSON-list or plain text input."""
+    stripped = text.strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [
+            str(value).strip()
+            for value in parsed
+            if str(value).strip()
+        ]
+
+    keys: list[str] = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].replace(",", " ")
+        keys.extend(part.strip() for part in line.split() if part.strip())
+    return keys
+
+
+def _read_item_keys_file(path: str | None) -> list[str]:
+    """Read Zotero item keys from a UTF-8 text or JSON file."""
+    if not path:
+        return []
+    return _parse_item_key_text(Path(path).read_text(encoding="utf-8"))
+
+
+def _merge_item_key_sources(
+    item_keys: list[str] | None,
+    item_keys_file: str | None,
+) -> list[str] | None:
+    """Merge CLI item-key lists while preserving first occurrence order."""
+    merged = list(item_keys or []) + _read_item_keys_file(item_keys_file)
+    unique = [key for key in dict.fromkeys(key.strip() for key in merged if key.strip())]
+    return unique or None
+
+
 def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
     """Keep CLI JSON stdout parseable when dependencies print progress text."""
     if not json_output:
@@ -1082,7 +1122,10 @@ def cmd_index_formulas(args):
                     page_max=getattr(args, "page_max", None),
                     sample_size=getattr(args, "sample_size", None),
                     sample_seed=getattr(args, "sample_seed", 0),
-                    exclude_item_keys=getattr(args, "exclude_item_keys", None),
+                    exclude_item_keys=_merge_item_key_sources(
+                        getattr(args, "exclude_item_keys", None),
+                        getattr(args, "exclude_item_keys_file", None),
+                    ),
                     include_high_density=getattr(args, "include_high_density", False),
                     allow_candidate_quality_warnings=getattr(args, "allow_candidate_quality_warnings", False),
                 ),
@@ -1233,7 +1276,10 @@ def cmd_estimate_formula_backfill(args):
                 page_max=getattr(args, "page_max", None),
                 sample_size=getattr(args, "sample_size", None),
                 sample_seed=getattr(args, "sample_seed", 0),
-                exclude_item_keys=getattr(args, "exclude_item_keys", None),
+                exclude_item_keys=_merge_item_key_sources(
+                    getattr(args, "exclude_item_keys", None),
+                    getattr(args, "exclude_item_keys_file", None),
+                ),
             ),
             json_output=args.json,
         )
@@ -2297,6 +2343,18 @@ def main(argv: list[str] | None = None) -> int:
         help="With --dry-run, seed for --sample-size so validation batches are reproducible",
     )
     sub_index_formulas.add_argument(
+        "--exclude-item-keys",
+        nargs="+",
+        default=None,
+        help="With --dry-run, exclude these Zotero item keys from --sample-size validation",
+    )
+    sub_index_formulas.add_argument(
+        "--exclude-item-keys-file",
+        type=str,
+        default=None,
+        help="With --dry-run, read excluded Zotero item keys from a text or JSON file",
+    )
+    sub_index_formulas.add_argument(
         "--dry-run",
         action="store_true",
         help="Estimate formula backfill without OCR calls, status writes, or index writes",
@@ -2447,6 +2505,12 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="Exclude these Zotero item keys from --sample-size random validation",
+    )
+    sub_formula_estimate.add_argument(
+        "--exclude-item-keys-file",
+        type=str,
+        default=None,
+        help="Read excluded Zotero item keys from a text or JSON file for --sample-size validation",
     )
     sub_formula_estimate.add_argument(
         "--resume-after",

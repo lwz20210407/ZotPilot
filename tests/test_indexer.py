@@ -3715,6 +3715,40 @@ class TestFormulaBackfill:
             page_max=None,
         )
 
+    def test_estimate_formula_backfill_tool_merges_exclude_key_file(self, tmp_path):
+        from zotpilot.tools import indexing as idx_mod
+
+        exclude_file = tmp_path / "tested-keys.txt"
+        exclude_file.write_text("DOC2\nDOC3, DOC4\nDOC2\n", encoding="utf-8")
+        config = MagicMock()
+        config.validate.return_value = []
+        indexer = MagicMock()
+        indexer.estimate_formula_backfill.return_value = {"processed": 1, "results": []}
+
+        with patch.object(idx_mod, "_get_config", return_value=config), \
+             patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer):
+            result = idx_mod.estimate_formula_backfill(
+                sample_size=2,
+                sample_seed=11,
+                exclude_item_keys=["DOC1", "DOC3"],
+                exclude_item_keys_file=str(exclude_file),
+            )
+
+        assert result["processed"] == 1
+        indexer.estimate_formula_backfill.assert_called_once_with(
+            item_key=None,
+            item_keys=None,
+            limit=None,
+            resume_after=None,
+            daily_call_budget=None,
+            sample_size=2,
+            sample_seed=11,
+            exclude_item_keys=["DOC1", "DOC3", "DOC2", "DOC4"],
+            pdf_fallback_max_pages=None,
+            page_min=None,
+            page_max=None,
+        )
+
     def test_formula_provider_error_is_tool_error_for_index_library(self, tmp_path):
         from zotpilot.indexer import FormulaProviderUnavailableError
         from zotpilot.state import ToolError

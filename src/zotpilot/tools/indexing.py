@@ -37,6 +37,46 @@ def _parse_json_string_list(value: Any) -> Any:
     return value
 
 
+def _parse_item_key_text(text: str) -> list[str]:
+    """Parse Zotero item keys from JSON-list or plain text input."""
+    stripped = text.strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [
+            str(value).strip()
+            for value in parsed
+            if str(value).strip()
+        ]
+
+    keys: list[str] = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].replace(",", " ")
+        keys.extend(part.strip() for part in line.split() if part.strip())
+    return keys
+
+
+def _read_item_keys_file(path: str | None) -> list[str]:
+    """Read Zotero item keys from a UTF-8 text or JSON file."""
+    if not path:
+        return []
+    return _parse_item_key_text(Path(path).read_text(encoding="utf-8"))
+
+
+def _merge_item_key_sources(
+    item_keys: list[str] | None,
+    item_keys_file: str | None,
+) -> list[str] | None:
+    """Merge item-key lists while preserving first occurrence order."""
+    merged = list(item_keys or []) + _read_item_keys_file(item_keys_file)
+    unique = [key for key in dict.fromkeys(key.strip() for key in merged if key.strip())]
+    return unique or None
+
+
 def _with_formula_cache_pdf_number_enrichment(config: Any, enabled: bool) -> Any:
     """Return a runtime-only config with cache PDF number enrichment enabled."""
     if not enabled:
@@ -557,6 +597,10 @@ def estimate_formula_backfill(
         BeforeValidator(_parse_json_string_list),
         Field(description="Exclude these Zotero item keys from sample_size random validation"),
     ] = None,
+    exclude_item_keys_file: Annotated[
+        str | None,
+        Field(description="Read excluded Zotero item keys from a text or JSON file for sample_size validation"),
+    ] = None,
     cache_pdf_number_enrichment: Annotated[
         bool,
         Field(
@@ -596,7 +640,10 @@ def estimate_formula_backfill(
     from ..vector_store import IndexUnavailableError
 
     item_keys = _parse_json_string_list(item_keys)
-    exclude_item_keys = _parse_json_string_list(exclude_item_keys)
+    exclude_item_keys = _merge_item_key_sources(
+        _parse_json_string_list(exclude_item_keys),
+        exclude_item_keys_file,
+    )
     _config = _with_formula_cache_pdf_number_enrichment(
         _get_config(),
         cache_pdf_number_enrichment,
