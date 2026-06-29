@@ -315,10 +315,27 @@ def _formula_equation_number_audit(equation_numbers: list[str]) -> dict[str, obj
                 })
         previous_by_prefix[prefix] = (equation_number, value)
 
+    missing_equation_number_total = sum(
+        int(break_row.get("missing_count", 0))
+        for break_row in sequence_breaks
+        if break_row.get("reason") == "missing_gap"
+    )
+    large_equation_number_gap_count = sum(
+        1 for break_row in sequence_breaks
+        if break_row.get("reason") == "large_gap"
+    )
+    equation_number_regression_count = sum(
+        1 for break_row in sequence_breaks
+        if break_row.get("reason") == "regression"
+    )
     return {
         "equation_number_prefixes": [prefix or "regular" for prefix in prefixes],
         "equation_number_warnings": sorted(warnings),
         "equation_number_warning_count": len(warnings),
+        "equation_number_sequence_break_count": len(sequence_breaks),
+        "missing_equation_number_total": missing_equation_number_total,
+        "large_equation_number_gap_count": large_equation_number_gap_count,
+        "equation_number_regression_count": equation_number_regression_count,
         "equation_number_sequence_breaks": sequence_breaks[:20],
     }
 
@@ -1117,6 +1134,22 @@ def _formula_candidate_quality_blocking_row(
         "text_layer_candidate_count": candidate_audit.get("text_layer_candidate_count", 0),
         "structured_cache_candidate_count": candidate_audit.get("structured_cache_candidate_count", 0),
         "ocr_needed_count": candidate_audit.get("ocr_needed_count", 0),
+        "equation_number_sequence_break_count": candidate_audit.get(
+            "equation_number_sequence_break_count",
+            0,
+        ),
+        "missing_equation_number_total": candidate_audit.get(
+            "missing_equation_number_total",
+            0,
+        ),
+        "large_equation_number_gap_count": candidate_audit.get(
+            "large_equation_number_gap_count",
+            0,
+        ),
+        "equation_number_regression_count": candidate_audit.get(
+            "equation_number_regression_count",
+            0,
+        ),
         "duplicate_equation_numbers": candidate_audit.get("duplicate_equation_numbers", []),
         "equation_number_sequence_breaks": candidate_audit.get(
             "equation_number_sequence_breaks",
@@ -1165,6 +1198,10 @@ def _formula_candidate_quality_source_totals(
         "text_layer_candidate_count",
         "structured_cache_candidate_count",
         "ocr_needed_count",
+        "equation_number_sequence_break_count",
+        "missing_equation_number_total",
+        "large_equation_number_gap_count",
+        "equation_number_regression_count",
     ]
     totals = {field: 0 for field in fields}
     totals["paper_count"] = len(rows)

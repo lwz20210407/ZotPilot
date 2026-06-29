@@ -2038,6 +2038,10 @@ class TestFormulaBackfill:
         audit = result["results"][0]["candidate_audit"]
         assert audit["equation_number_prefixes"] == ["regular"]
         assert audit["equation_number_warnings"] == ["missing_equation_number_gap"]
+        assert audit["equation_number_sequence_break_count"] == 2
+        assert audit["missing_equation_number_total"] == 5
+        assert audit["large_equation_number_gap_count"] == 0
+        assert audit["equation_number_regression_count"] == 0
         assert audit["equation_number_sequence_breaks"] == [
             {
                 "previous": "(1)",
@@ -2296,6 +2300,10 @@ class TestFormulaBackfill:
             "text_layer_candidate_count": 0,
             "structured_cache_candidate_count": 3,
             "ocr_needed_count": 0,
+            "equation_number_sequence_break_count": 1,
+            "missing_equation_number_total": 1,
+            "large_equation_number_gap_count": 0,
+            "equation_number_regression_count": 0,
             "paper_count": 1,
         }
         assert result["summary"]["candidate_quality_blocking_source_totals"] == (
@@ -2314,6 +2322,10 @@ class TestFormulaBackfill:
                 "text_layer_candidate_count": 0,
                 "structured_cache_candidate_count": 3,
                 "ocr_needed_count": 0,
+                "equation_number_sequence_break_count": 1,
+                "missing_equation_number_total": 1,
+                "large_equation_number_gap_count": 0,
+                "equation_number_regression_count": 0,
                 "duplicate_equation_numbers": [],
                 "equation_number_sequence_breaks": [
                     {
