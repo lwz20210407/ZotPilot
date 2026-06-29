@@ -3477,6 +3477,8 @@ def _scan_pdf_equation_number_records_by_page(
                 continue
             if _looks_like_bibliographic_issue_number_record(record.text, record.number):
                 continue
+            if _looks_like_table_or_step_plain_number_record(record.text, record.number):
+                continue
             if _replace_duplicate_pdf_equation_record_if_better(record, records, standalone_records):
                 continue
             if _duplicates_pdf_equation_record(record, [*records, *standalone_records]):
@@ -4488,6 +4490,34 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     if abbrev_hits >= 3 and re.search(r"\b(?:J|Journal|Proc|Proceedings|Trans|Transactions)\.?\b", prefix):
         return True
     return False
+
+
+def _looks_like_table_or_step_plain_number_record(text: str, equation_number: str) -> bool:
+    """Reject plain-number table/procedure tokens misread as equations."""
+    value = _regular_equation_number_value(equation_number)
+    if value is None or value > 9:
+        return False
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized:
+        return False
+    number_pattern = rf"[\(（]\s*{value}\s*[\)）]"
+    if re.search(rf"(?:步骤|步驟|step|procedure)\s*{number_pattern}", normalized, re.IGNORECASE):
+        return True
+
+    private_empty_paren_number_pattern = rf"\uf028\s*\uf029\s*{value}"
+    number_hits = len(re.findall(number_pattern, normalized)) + len(
+        re.findall(private_empty_paren_number_pattern, normalized)
+    )
+    if number_hits < 4:
+        return False
+    decimal_hits = len(re.findall(r"[-+−]?\d+\.\d+", normalized))
+    repeated_label_hits = len(
+        re.findall(rf"\b[A-Za-zΑ-Ωα-ω]\s*{number_pattern}", normalized)
+    )
+    material_or_table_label = bool(
+        re.search(r"\b(?:AA|AZ|Al|Ti|Q)\s*\d{2,}[A-Za-z0-9-]*\b", normalized)
+    )
+    return repeated_label_hits >= 3 and (decimal_hits >= 1 or material_or_table_label or number_hits >= 6)
 
 
 def _looks_like_reference_or_material_trailing_number(prefix: str, equation_number: str) -> bool:

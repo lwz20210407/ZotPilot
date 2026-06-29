@@ -4064,6 +4064,84 @@ def test_pdf_equation_scan_keeps_tight_standalone_formula_record():
     assert "Considering the damage conditions" not in records[0].text
 
 
+def test_pdf_equation_scan_keeps_plain_number_formula_record():
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [(80.0, 100.0, 540.0, 130.0, "E = m c ^ 2 (1)")]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    assert [record.number for record in scan.records_by_page[1]] == ["(1)"]
+
+
+def test_pdf_equation_scan_rejects_repeated_plain_number_table_row():
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (
+                        53.0,
+                        328.0,
+                        523.0,
+                        429.0,
+                        "1 11 c 1 12 c 1 21 c 1 66 c "
+                        "a(1) b(1) c(1) 1 1 a(1)",
+                    )
+                ]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    assert scan.records_by_page == {}
+
+
+def test_pdf_equation_scan_rejects_cjk_procedure_step_number():
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [(270.0, 730.0, 531.0, 760.0, "b xx ε Δ 和αb；重复步骤（3）")]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    assert scan.records_by_page == {}
+
+
 def test_mineru_cache_provider_appends_gap_pdf_candidates_from_standalone_numbers(tmp_path):
     cache_dir = tmp_path / "mineru-cache" / "ITEM123"
     cache_dir.mkdir(parents=True)
