@@ -497,6 +497,7 @@ def test_extract_pdf_block_equation_number_accepts_private_use_math_glyphs():
     assert _extract_pdf_block_equation_number("1 2 3 (32)") == "(32)"
     assert _extract_pdf_block_equation_number("9 σ2 xx = cʹʹ (6–1–)") == "(6-1)"
     assert _extract_pdf_block_equation_number("√ √ √ √ (12–3–)") == "(12-3)"
+    assert _extract_pdf_block_equation_number(r"\dot{\epsilon}=\dot{\epsilon}_0 e^{Q/RT} (3.2.1)") == "(3.2.1)"
     assert _extract_pdf_block_equation_number(
         "Model 1 M=0.7, S=4, p=0, r=1 144 (120–160) 55 [37–66]"
     ) == ""
@@ -506,6 +507,7 @@ def test_extract_pdf_block_equation_number_accepts_private_use_math_glyphs():
     ) == "(２)"
     assert _extract_pdf_block_equation_number("４３（０５）：１３～１６．") == ""
     assert _extract_pdf_block_equation_number("Fig ð5:1Þ") == ""
+    assert _extract_pdf_block_equation_number(r"E = mc^2 (0002)") == ""
     assert _extract_pdf_block_equation_number("利用式(2)对屈服强度进行拟合") == ""
     assert _extract_pdf_block_equation_number("model ð7Þ") == ""
     assert _extract_pdf_block_equation_number("result ð9Þ") == ""
@@ -573,6 +575,10 @@ def test_extract_embedded_pdf_equation_number_accepts_mid_block_formula_numbers(
     assert _extract_embedded_pdf_equation_number(
         "Logan, R.W., Hosford, W.F., 1980. Upper-bound anisotropic yield locus "
         "calculations assuming <111>-pencil glide. Int. J. Mech. Sci. 22 (7), 419–430."
+    ) == ""
+    assert _extract_embedded_pdf_equation_number("Sci. Adv. 8 (32) (2022) eabp9096.") == ""
+    assert _extract_embedded_pdf_equation_number(
+        "The orientation relationship of (110)M // (110)T // (0002)HCP."
     ) == ""
     assert _extract_pdf_block_equation_number(
         "Logan, R.W., Hosford, W.F., 1980. Upper-bound anisotropic yield locus "
@@ -703,6 +709,18 @@ def test_text_layer_provider_does_not_reinclude_zero_confidence_metadata(tmp_pat
         "The value k = 3 was used.",
         bbox,
         {"CMMI10"},
+        {2},
+    ) == 0.0
+    assert _candidate_confidence(
+        "⎝ 0 . 69 0 . 24 − 0 . 68 0 . 6 − 0 . 72 0 . 35 − 0 . 41 − 0 . 65 − 0 . 65",
+        bbox,
+        {"Cambria Math"},
+        {2},
+    ) == 0.0
+    assert _candidate_confidence(
+        "⎠ ( 111 ) M ( 111 ) M // ( 111 ) T ; [ 110 ] M // [ 110 ] T",
+        bbox,
+        {"Cambria Math"},
         {2},
     ) == 0.0
     assert _candidate_confidence(

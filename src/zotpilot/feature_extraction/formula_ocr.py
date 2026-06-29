@@ -4259,6 +4259,8 @@ def _extract_embedded_pdf_equation_number(text: str) -> str:
             continue
         if _looks_like_embedded_prose_citation_context(prefix, suffix):
             continue
+        if _looks_like_crystallographic_orientation_context(prefix, suffix):
+            continue
         if CAPTION_OR_REFERENCE_RE.search(prefix) or SECTION_HEADING_RE.match(prefix):
             continue
         if re.search(r"(?:\b(?:eq\.?|equation)|式)\s*$", prefix, flags=re.IGNORECASE):
@@ -4408,11 +4410,18 @@ def _looks_like_bibliographic_issue_number_context(prefix: str, suffix: str) -> 
     normalized_suffix = _normalize_space(suffix)
     if not re.search(r"\b\d{1,4}\s*$", normalized_prefix):
         return False
+    abbrev_hits = len(re.findall(r"\b[A-Z][A-Za-z]{1,12}\.", normalized_prefix))
+    if (
+        re.match(r"^[\(（]\s*(?:18|19|20)\d{2}\s*[\)）]", normalized_suffix)
+        and abbrev_hits >= 1
+        and len(WORD_RE.findall(normalized_prefix)) <= 6
+        and not (_has_formula_relation(prefix) or _has_formula_structure(prefix))
+    ):
+        return True
     if not re.match(r"^[,，]\s*\d+\s*[-–—]\s*\d+", normalized_suffix):
         return False
     if re.search(r"\((?:18|19|20)\d{2}\)", normalized_suffix):
         return True
-    abbrev_hits = len(re.findall(r"\b[A-Z][A-Za-z]{1,12}\.", normalized_prefix))
     if (
         re.search(r"(?:18|19|20)\d{2}", normalized_prefix)
         and abbrev_hits >= 1
@@ -4573,6 +4582,44 @@ def _looks_like_embedded_prose_citation_context(prefix: str, suffix: str) -> boo
     return suffix_words >= 4 and math_signal_count <= max(5, prefix_words // 4)
 
 
+def _looks_like_crystallographic_plane_relation_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if "//" not in normalized:
+        return False
+    if re.search(r"[=¼þ<>≤≥≈≠]|\\[A-Za-z]+", normalized):
+        return False
+    plane_hits = re.findall(r"[\(（\[]\s*\d{2,4}\s*[\)）\]]\s*[A-Z]{0,4}", normalized)
+    if len(plane_hits) < 2:
+        return False
+    word_hits = len(WORD_RE.findall(normalized))
+    if word_hits <= 10:
+        return True
+    return bool(
+        re.search(
+            r"\b(?:orientation|relationship|crystallographic|plane|planes?|"
+            r"direction|directions?|twin|boundary|hcp|fcc|bcc|martensite)\b",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_crystallographic_orientation_context(prefix: str, suffix: str) -> bool:
+    combined = unicodedata.normalize("NFKC", _normalize_space(f"{prefix} {suffix}"))
+    if not _looks_like_crystallographic_plane_relation_text(combined):
+        return False
+    if _has_formula_structure(combined):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:orientation|relationship|crystallographic|plane|planes?|"
+            r"direction|directions?|twin|boundary|hcp|fcc|bcc|martensite)\b",
+            combined,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _is_embedded_prose_reference_number(text: str, start: int) -> bool:
     if start <= 0:
         return False
@@ -4596,11 +4643,15 @@ def _format_pdf_equation_number(number: str) -> str:
     parts = re.split(r"[.-]", normalized)
     if not all(part.isdigit() for part in parts):
         return ""
+    if any(len(part) > 1 and part.startswith("0") for part in parts):
+        return ""
+    if len(parts) > 3:
+        return ""
     if len(parts) == 1:
         value = int(parts[0])
         if value == 0 or value > 80:
             return ""
-    elif int(parts[0]) == 0:
+    elif int(parts[0]) == 0 or int(parts[0]) > 80:
         return ""
     if "-" in normalized and len(parts) > 3:
         return ""
@@ -4910,6 +4961,10 @@ def _looks_like_non_formula_text(text: str) -> bool:
         return True
     if AUTHOR_AFFILIATION_RE.search(normalized):
         return True
+    if _looks_like_crystallographic_plane_relation_text(normalized):
+        return True
+    if _looks_like_unlabeled_numeric_matrix_fragment(normalized):
+        return True
 
     symbol_hits = len(MATH_SYMBOL_RE.findall(normalized))
     word_hits = len(WORD_RE.findall(normalized))
@@ -4944,6 +4999,26 @@ def _looks_like_non_formula_text(text: str) -> bool:
     if word_hits > 4 and symbol_density < 0.04:
         return True
     return symbol_hits < 2
+
+
+def _looks_like_unlabeled_numeric_matrix_fragment(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized:
+        return False
+    if re.search(r"[A-Za-z\u4e00-\u9fffΑ-Ωα-ω\\]", normalized):
+        return False
+    if re.search(r"[=¼þ<>≤≥≈≠∑∏∫√∞∂∇∆]", normalized):
+        return False
+    digit_hits = len(re.findall(r"\d", normalized))
+    decimal_hits = len(re.findall(r"\d\s*\.\s*\d", normalized))
+    if digit_hits < 8 or decimal_hits < 2:
+        return False
+    stripped = re.sub(
+        r"[0-9０-９\s.,，;:：()+\-−–—*/⎛⎜⎝⎞⎟⎠\[\]{}|]+",
+        "",
+        normalized,
+    )
+    return stripped == ""
 
 
 def _has_formula_relation(text: str) -> bool:
