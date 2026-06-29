@@ -1107,6 +1107,45 @@ def _formula_candidate_quality_recommended_review(
     return None
 
 
+def _formula_candidate_quality_severity(
+    *,
+    candidate_audit: dict[str, object],
+    review_reasons: list[str],
+) -> str:
+    """Classify candidate-stage blockers without changing write-block behavior."""
+    reason_set = set(review_reasons)
+    if "fallback_truncated" in reason_set:
+        return "fallback_truncated"
+    if "text_layer_high_density_requires_structured_cache" in reason_set:
+        return "structured_cache_required"
+    if "cached_latex_low_quality" in reason_set:
+        return "cached_latex_quality"
+    if "cached_latex_missing_equation_numbers" in reason_set:
+        return "cached_latex_numbering"
+    if "duplicate_equation_numbers" in reason_set:
+        return "duplicate_numbering"
+    if "large_equation_number_gap" in reason_set:
+        return "large_numbering_gap"
+    if reason_set == {"missing_equation_number_gap"}:
+        missing_total = _int_metadata_value(candidate_audit.get("missing_equation_number_total", 0))
+        large_gap_count = _int_metadata_value(candidate_audit.get("large_equation_number_gap_count", 0))
+        truncated_count = _int_metadata_value(candidate_audit.get("truncated_source_count", 0))
+        regression_count = _int_metadata_value(candidate_audit.get("equation_number_regression_count", 0))
+        duplicate_count = _int_metadata_value(candidate_audit.get("duplicate_equation_number_count", 0))
+        if (
+            missing_total <= 1
+            and large_gap_count == 0
+            and truncated_count == 0
+            and regression_count == 0
+            and duplicate_count == 0
+        ):
+            return "minor_numbering_gap"
+        return "numbering_gap"
+    if reason_set & _NUMBERING_CANDIDATE_REVIEW_WARNINGS:
+        return "numbering_review"
+    return "mixed"
+
+
 def _formula_candidate_quality_blocking_row(
     *,
     item_key: str,
@@ -1116,11 +1155,16 @@ def _formula_candidate_quality_blocking_row(
     review_reasons: list[str],
 ) -> dict[str, object]:
     """Build the read-only estimate row for papers that should not be written yet."""
+    severity = _formula_candidate_quality_severity(
+        candidate_audit=candidate_audit,
+        review_reasons=review_reasons,
+    )
     row = {
         "item_key": item_key,
         "title": title,
         "candidate_count": candidate_count,
         "review_reasons": review_reasons,
+        "candidate_quality_severity": severity,
         "equation_number_warnings": candidate_audit.get("equation_number_warnings", []),
         "truncated_source_count": candidate_audit.get("truncated_source_count", 0),
         "cached_latex_missing_equation_number_count": candidate_audit.get(
@@ -1183,6 +1227,18 @@ def _formula_candidate_quality_reason_counts(
             reason for reason in review_reasons
             if isinstance(reason, str)
         )
+    return dict(sorted(counts.items()))
+
+
+def _formula_candidate_quality_severity_counts(
+    rows: list[dict[str, object]],
+) -> dict[str, int]:
+    """Count candidate-stage blocking severity buckets across estimate rows."""
+    counts: Counter[str] = Counter()
+    for row in rows:
+        severity = row.get("candidate_quality_severity", "")
+        if isinstance(severity, str) and severity:
+            counts[severity] += 1
     return dict(sorted(counts.items()))
 
 
@@ -2585,6 +2641,9 @@ class Indexer:
         candidate_quality_blocking_reason_counts = _formula_candidate_quality_reason_counts(
             candidate_quality_blocking_papers
         )
+        candidate_quality_blocking_severity_counts = _formula_candidate_quality_severity_counts(
+            candidate_quality_blocking_papers
+        )
         candidate_quality_blocking_source_totals = _formula_candidate_quality_source_totals(
             candidate_quality_blocking_papers
         )
@@ -2628,6 +2687,7 @@ class Indexer:
             "cached_latex_missing_number_paper_count": len(cached_latex_missing_number_papers),
             "candidate_quality_blocking_paper_count": len(candidate_quality_blocking_papers),
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
+            "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "request_complete": request_complete,
@@ -2684,6 +2744,7 @@ class Indexer:
             "candidate_quality_blocking_papers": candidate_quality_blocking_papers,
             "candidate_quality_blocking_paper_count": len(candidate_quality_blocking_papers),
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
+            "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "unmatched_requested_item_keys": unmatched_requested_item_keys,
