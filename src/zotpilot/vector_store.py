@@ -207,7 +207,9 @@ class VectorStore:
         # collection.add() rejects calls larger than get_max_batch_size()
         # (5461 on the SQLite backend); large documents (books) routinely
         # exceed this. range(0, 0, step) is empty, so n == 0 adds nothing.
-        step = self._max_add_batch
+        step = int(getattr(self, "_max_add_batch", 5000) or 5000)
+        if step < 1:
+            step = 5000
         for i in range(0, n, step):
             sl = slice(i, i + step)
             self.collection.add(

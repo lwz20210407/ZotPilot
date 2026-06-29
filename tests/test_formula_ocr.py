@@ -4026,6 +4026,141 @@ def test_mineru_cache_numbering_audit_scans_to_cached_candidate_pages(tmp_path):
     assert max(doc.visited_pages) >= 119
 
 
+def test_pdf_equation_scan_keeps_tight_standalone_formula_record():
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (
+                        37.0,
+                        302.0,
+                        562.0,
+                        388.0,
+                        "Considering the damage conditions, "
+                        "D1/alpha D1/alpha alpha 2 3(1+nu) pS "
+                        "3(1+nu) pS alpha 2 alpha-1 alpha-1",
+                    ),
+                    (74.0, 342.0, 90.0, 364.0, "∂φ∗ DH ∂YH"),
+                    (542.0, 346.0, 562.0, 360.0, "(18)"),
+                ]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    records = scan.records_by_page[1]
+    assert [record.number for record in records] == ["(18)"]
+    assert records[0].bbox == pytest.approx((74.0, 342.0, 562.0, 364.0))
+    assert "Considering the damage conditions" not in records[0].text
+
+
+def test_mineru_cache_provider_appends_gap_pdf_candidates_from_standalone_numbers(tmp_path):
+    cache_dir = tmp_path / "mineru-cache" / "ITEM123"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "content_list.json").write_text(
+        json.dumps([
+            {
+                "type": "interline_equation",
+                "page_idx": 0,
+                "bbox": [40, 100, 220, 120],
+                "text": r"a = b",
+                "equation_number": "(1)",
+            },
+            {
+                "type": "interline_equation",
+                "page_idx": 0,
+                "bbox": [40, 180, 220, 200],
+                "text": r"p _ H = H \langle \eta \rangle p",
+                "equation_number": "(17)",
+            },
+            {
+                "type": "interline_equation",
+                "page_idx": 0,
+                "bbox": [40, 260, 220, 280],
+                "text": r"D _ H = \lambda _ H Y _ H",
+                "equation_number": "(19)",
+            },
+            {
+                "type": "interline_equation",
+                "page_idx": 0,
+                "bbox": [40, 340, 220, 360],
+                "text": r"\varepsilon _ { S f } = \gamma _ f / \sqrt { 3 }",
+                "equation_number": "(21)",
+            },
+        ]),
+        encoding="utf-8",
+    )
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (
+                        37.0,
+                        302.0,
+                        562.0,
+                        388.0,
+                        "Considering the damage conditions, "
+                        "D1/alpha D1/alpha alpha 2 3(1+nu) pS "
+                        "3(1+nu) pS alpha 2 alpha-1 alpha-1",
+                    ),
+                    (74.0, 342.0, 90.0, 364.0, "∂φ∗ DH ∂YH"),
+                    (542.0, 346.0, 562.0, 360.0, "(18)"),
+                    (37.0, 520.0, 294.0, 546.0, "pf = [ epsilon0 + exp( -eta / eta0 ) ]"),
+                    (274.0, 524.0, 294.0, 538.0, "(20)"),
+                ]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+        def close(self):
+            pass
+
+    provider = create_formula_candidate_provider(
+        "mineru_cache",
+        config=SimpleNamespace(
+            formula_candidate_cache_dirs=str(tmp_path / "mineru-cache"),
+            formula_candidate_cache_pdf_number_enrichment=True,
+            formula_candidate_pdf_number_append_missing_candidates=True,
+        ),
+    )
+
+    with patch("zotpilot.feature_extraction.formula_ocr.pymupdf.open", return_value=FakeDoc()):
+        candidates = provider.extract_candidates(pdf_path, item_key="ITEM123")
+
+    numbers = [candidate.equation_number for candidate in candidates]
+    assert "(18)" in numbers
+    assert "(20)" in numbers
+    missing_candidates = [
+        candidate for candidate in candidates
+        if candidate.equation_number in {"(18)", "(20)"}
+    ]
+    assert all(candidate.source == "pdf_text_equation_number" for candidate in missing_candidates)
+    assert all(not candidate.latex for candidate in missing_candidates)
+    assert count_formula_provider_calls(candidates) == 2
+
+
 def test_mineru_cache_provider_pairs_unnumbered_latex_with_pdf_number_records(tmp_path):
     cache_dir = tmp_path / "mineru-cache" / "ITEM123"
     cache_dir.mkdir(parents=True)

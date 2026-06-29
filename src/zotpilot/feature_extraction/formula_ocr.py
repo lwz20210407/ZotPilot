@@ -3466,7 +3466,10 @@ def _scan_pdf_equation_number_records_by_page(
             )
             if standalone:
                 record = _merge_standalone_equation_record_with_formula_block(record, page_blocks)
-                if not record.standalone:
+                if (
+                    not record.standalone
+                    and not _looks_like_formula_block_for_standalone_number(record.text)
+                ):
                     record = _merge_inline_equation_record_with_formula_blocks(record, page_blocks)
             else:
                 record = _merge_inline_equation_record_with_formula_blocks(record, page_blocks)
