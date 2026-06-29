@@ -519,6 +519,60 @@ class TestZoteroClient:
 
         assert 0 < risk < 20.0
 
+    def test_content_risk_ignores_duplicate_crystallographic_planes(self, tmp_path, monkeypatch):
+        pdf_path = tmp_path / "english-paper-with-diffraction-planes.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        class FakePage:
+            def get_text(self, mode="text"):
+                if mode == "blocks":
+                    line = "⎠ (111)M (111)M//(111)T; [110]M//[110]T"
+                    return [(0, 0, 1, 1, line), (0, 0, 1, 1, line)]
+                return "English diffraction discussion without translated text"
+
+        class FakeDoc:
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, index):
+                return FakePage()
+
+            def close(self):
+                pass
+
+        monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda _path: FakeDoc()))
+
+        risk = pdf_content_translation_risk_score(pdf_path, title="English materials paper")
+
+        assert risk == 0.0
+
+    def test_content_risk_counts_duplicate_numbered_equation_lines(self, tmp_path, monkeypatch):
+        pdf_path = tmp_path / "bilingual-layout.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        class FakePage:
+            def get_text(self, mode="text"):
+                if mode == "blocks":
+                    line = "D = 1 - exp(-p) (1)"
+                    return [(0, 0, 1, 1, line), (0, 0, 1, 1, line)]
+                return "English body text"
+
+        class FakeDoc:
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, index):
+                return FakePage()
+
+            def close(self):
+                pass
+
+        monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda _path: FakeDoc()))
+
+        risk = pdf_content_translation_risk_score(pdf_path, title="English paper")
+
+        assert risk >= 20.0
+
     def test_get_item_key_by_doi(self, zotero_db):
         client = ZoteroClient(zotero_db)
         assert client.get_item_key_by_doi("https://doi.org/10.1234/test") == "ITEM001"

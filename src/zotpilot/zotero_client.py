@@ -156,7 +156,7 @@ def pdf_content_translation_risk_score(path: Path | str | None, *, title: str = 
 def _looks_like_numbered_formula_line(text: str) -> bool:
     if not _NUMBERED_FORMULA_LINE_RE.search(text):
         return False
-    return any(symbol in text for symbol in ("=", "≤", "≥", "≈", "σ", "ε", "η", "D", "T", "p"))
+    return any(symbol in text for symbol in ("=", "≤", "≥", "≈", "σ", "ε", "η"))
 
 
 def _pdf_filename_translation_risk_score(path: Path | str | None) -> float:
