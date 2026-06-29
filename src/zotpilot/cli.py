@@ -1025,11 +1025,20 @@ def _print_formula_backfill_estimate(result: dict, *, preview_limit: int = 0) ->
                 f"{plan.get('estimated_provider_calls', 0)} OCR call(s)"
             )
             for segment in (plan.get("segments") or [])[:5]:
+                review_ranges = (
+                    segment.get("review_candidate_index_ranges")
+                    or f"{segment.get('candidate_start')}-{segment.get('candidate_end')}"
+                )
+                source_ranges = (
+                    segment.get("source_candidate_index_ranges")
+                    or segment.get("formula_index_ranges")
+                    or "?"
+                )
                 print(
                     "    - segment "
                     f"{segment.get('segment_index')}: pages {segment.get('page_min')}-{segment.get('page_max')}, "
-                    f"ordered candidates {segment.get('candidate_start')}-{segment.get('candidate_end')}, "
-                    f"formula ids {segment.get('formula_index_ranges') or '?'}, "
+                    f"review candidates {review_ranges}, "
+                    f"source ids {source_ranges}, "
                     f"OCR {segment.get('estimated_provider_calls')}, "
                     f"equations {segment.get('first_equation_number') or '?'}.."
                     f"{segment.get('last_equation_number') or '?'}"

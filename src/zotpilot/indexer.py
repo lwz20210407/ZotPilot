@@ -519,15 +519,27 @@ def _formula_candidate_segment_summary(
     provider_calls = sum(1 for candidate in candidates if _formula_candidate_needs_ocr(candidate))
     formula_index_min = min(formula_indices) if formula_indices else 0
     formula_index_max = max(formula_indices) if formula_indices else 0
+    review_indices = list(range(candidate_start, candidate_end))
+    review_index_min = min(review_indices) if review_indices else 0
+    review_index_max = max(review_indices) if review_indices else 0
+    formula_index_ranges = _format_index_ranges(formula_indices)
     return {
         "segment_index": segment_index,
         "candidate_start": candidate_start,
         "candidate_end": candidate_end,
+        "review_candidate_index_min": review_index_min,
+        "review_candidate_index_max": review_index_max,
+        "review_candidate_index_count": len(review_indices),
+        "review_candidate_index_ranges": _format_index_ranges(review_indices),
         "formula_index_offset": formula_index_min,
         "formula_index_min": formula_index_min,
         "formula_index_max": formula_index_max,
         "formula_index_count": len(set(formula_indices)),
-        "formula_index_ranges": _format_index_ranges(formula_indices),
+        "formula_index_ranges": formula_index_ranges,
+        "source_candidate_index_min": formula_index_min,
+        "source_candidate_index_max": formula_index_max,
+        "source_candidate_index_count": len(set(formula_indices)),
+        "source_candidate_index_ranges": formula_index_ranges,
         "page_min": audit["page_min"],
         "page_max": audit["page_max"],
         "candidate_count": audit["candidate_count"],
@@ -2633,12 +2645,11 @@ class Indexer:
             write_block_reasons.append("high_density_deferred")
         write_blocked = bool(write_block_reasons)
         write_review_required = bool(
-            dense_formula_papers
+            high_density_backfill_plans
             and not include_high_density
-            and not write_blocked
             and not unmatched_requested_item_keys
         )
-        if write_review_required:
+        if write_review_required and not write_blocked:
             next_action = (
                 "Review the high-density formula page-window plan before writing formulas; "
                 "prefer cached LaTeX or explicit page-window backfill instead of a full-document OCR run."

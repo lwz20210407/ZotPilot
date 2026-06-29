@@ -2012,6 +2012,49 @@ class TestFormulaBackfill:
         assert result["high_density_backfill_plans"][0]["segments"][1]["formula_index_offset"] == 2
         assert result["summary"]["high_density_backfill_plan_count"] == 1
 
+    def test_estimate_formula_backfill_marks_blocked_high_density_plan_for_review(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "thesis.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("THESIS1", "Damage mechanics thesis", "Auth", 2024, pdf_path)
+        candidates = [
+            FormulaCandidate(
+                page_num=10 + index,
+                bbox=(0, index * 10, 100, index * 10 + 8),
+                raw_text=rf"\sigma_{{{index}}}=E\epsilon",
+                confidence=0.95,
+                equation_number=number,
+            )
+            for index, number in enumerate(["(3.1)", "(3.8)", "(3.9)"])
+        ]
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(
+            **{
+                **self._hash_config().__dict__,
+                "formula_ocr_provider": "simpletex",
+                "formula_ocr_simpletex_min_interval": 0.5,
+                "formula_ocr_high_density_call_threshold": 2,
+            }
+        )
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"THESIS1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_item.return_value = item
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.estimate_formula_backfill(item_key="THESIS1", daily_call_budget=1800)
+
+        assert result["write_blocked"] is True
+        assert result["write_review_required"] is True
+        assert result["summary"]["write_review_required"] is True
+        assert result["summary"]["write_block_reasons"] == ["candidate_quality_review_required"]
+        assert result["high_density_backfill_plans"][0]["item_key"] == "THESIS1"
+        assert "Review candidate-stage formula quality warnings" in result["summary"]["next_action"]
+
     def test_estimate_formula_backfill_marks_single_item_high_density_for_review(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer
@@ -2211,15 +2254,18 @@ class TestFormulaBackfill:
         segment = _formula_candidate_segment_summary(
             segment_index=1,
             candidates=page_ordered_candidates,
-            formula_indices=[1, 2, 3, 4],
-            candidate_start=0,
-            candidate_end=4,
+            formula_indices=[101, 7, 3, 44],
+            candidate_start=10,
+            candidate_end=14,
             data_egress=False,
         )
         assert segment["first_equation_number"] == "(4.27)"
         assert segment["last_equation_number"] == "(4.30)"
         assert segment["equation_number_sequence_breaks"] == []
         assert "equation_number_regression" not in segment["equation_number_warnings"]
+        assert segment["review_candidate_index_ranges"] == "10-13"
+        assert segment["source_candidate_index_ranges"] == "3,7,44,101"
+        assert segment["formula_index_ranges"] == "3,7,44,101"
 
     def test_formula_candidate_audit_uses_equation_review_order(self):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
