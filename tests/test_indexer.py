@@ -294,7 +294,7 @@ class TestFormulaBackfill:
                 "--preview-all-candidates",
                 "--json",
             ],
-            "opens_pdf": False,
+            "opens_pdf": True,
             "writes_index": False,
             "uses_external_ocr": False,
         }
@@ -1957,6 +1957,48 @@ class TestFormulaBackfill:
         assert result["high_density_backfill_plans"][0]["segments"][1]["formula_index_offset"] == 2
         assert result["summary"]["high_density_backfill_plan_count"] == 1
 
+    def test_estimate_formula_backfill_marks_single_item_high_density_for_review(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "thesis.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("THESIS1", "Damage mechanics thesis", "Auth", 2024, pdf_path)
+        candidates = [
+            FormulaCandidate(
+                page_num=10 + index,
+                bbox=(0, index * 10, 100, index * 10 + 8),
+                raw_text=rf"\sigma_{{{index}}}=E\epsilon",
+                confidence=0.95,
+                equation_number=f"(3.{index + 1})",
+            )
+            for index in range(5)
+        ]
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(
+            **{
+                **self._hash_config().__dict__,
+                "formula_ocr_provider": "simpletex",
+                "formula_ocr_simpletex_min_interval": 0.5,
+                "formula_ocr_high_density_call_threshold": 2,
+            }
+        )
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"THESIS1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_item.return_value = item
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.estimate_formula_backfill(item_key="THESIS1", daily_call_budget=1800)
+
+        assert result["write_blocked"] is False
+        assert result["write_review_required"] is True
+        assert result["summary"]["write_review_required"] is True
+        assert "Review the high-density formula page-window plan" in result["summary"]["next_action"]
+        assert result["high_density_backfill_plans"][0]["item_key"] == "THESIS1"
+
     def test_high_density_page_window_plan_audits_equation_numbers_in_review_order(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer
@@ -2276,7 +2318,7 @@ class TestFormulaBackfill:
                         "--preview-all-candidates",
                         "--json",
                     ],
-                    "opens_pdf": False,
+                    "opens_pdf": True,
                     "writes_index": False,
                     "uses_external_ocr": False,
                 },
@@ -2335,7 +2377,7 @@ class TestFormulaBackfill:
                 "--preview-all-candidates",
                 "--json",
             ],
-            "opens_pdf": False,
+            "opens_pdf": True,
             "writes_index": False,
             "uses_external_ocr": False,
         }
@@ -2396,7 +2438,7 @@ class TestFormulaBackfill:
                 "--preview-all-candidates",
                 "--json",
             ],
-            "opens_pdf": False,
+            "opens_pdf": True,
             "writes_index": False,
             "uses_external_ocr": False,
         }
@@ -2999,12 +3041,30 @@ class TestFormulaBackfill:
                 "cached_latex_count": 1,
                 "missing_equation_number_count": 1,
                 "missing_equation_number_ratio": 1.0,
+                "recommended_review": {
+                    "mode": "cached_latex_quality_review",
+                    "reason": "cached_latex_missing_equation_numbers",
+                    "item_key": "DOC1",
+                    "cli_args": [
+                        "estimate-formula-backfill",
+                        "--item-key",
+                        "DOC1",
+                        "--cache-pdf-number-enrichment",
+                        "--preview-all-candidates",
+                        "--json",
+                    ],
+                    "opens_pdf": True,
+                    "writes_index": False,
+                    "uses_external_ocr": False,
+                },
             }
         ]
         assert result["candidate_quality_blocking_paper_count"] == 1
         assert result["candidate_quality_blocking_papers"][0]["review_reasons"] == [
             "cached_latex_missing_equation_numbers"
         ]
+        assert result["candidate_quality_blocking_papers"][0]["recommended_review"]["opens_pdf"] is True
+        assert result["candidate_quality_blocking_papers"][0]["recommended_review"]["uses_external_ocr"] is False
         assert result["summary"]["next_action"].startswith(
             "Review candidate-stage formula quality warnings"
         )

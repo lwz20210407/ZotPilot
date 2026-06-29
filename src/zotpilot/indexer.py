@@ -998,7 +998,7 @@ def _formula_cached_latex_quality_review(
             "--preview-all-candidates",
             "--json",
         ],
-        "opens_pdf": False,
+        "opens_pdf": True,
         "writes_index": False,
         "uses_external_ocr": False,
     }
@@ -1027,7 +1027,7 @@ def _formula_structured_cache_required_review(
             "--preview-all-candidates",
             "--json",
         ],
-        "opens_pdf": False,
+        "opens_pdf": True,
         "writes_index": False,
         "uses_external_ocr": False,
     }
@@ -1051,7 +1051,7 @@ def _formula_candidate_numbering_review(
             "--preview-all-candidates",
             "--json",
         ],
-        "opens_pdf": False,
+        "opens_pdf": True,
         "writes_index": False,
         "uses_external_ocr": False,
     }
@@ -2313,6 +2313,10 @@ class Indexer:
                         "missing_equation_number_ratio": candidate_audit[
                             "cached_latex_missing_equation_number_ratio"
                         ],
+                        "recommended_review": _formula_cached_latex_quality_review(
+                            item_key=item.item_key,
+                            reason="cached_latex_missing_equation_numbers",
+                        ),
                     })
             if is_deferred_high_density:
                 row["default_batch_status"] = "deferred_high_density"
@@ -2478,7 +2482,17 @@ class Indexer:
         if deferred_high_density_candidates:
             write_block_reasons.append("high_density_deferred")
         write_blocked = bool(write_block_reasons)
-        write_review_required = False
+        write_review_required = bool(
+            dense_formula_papers
+            and not include_high_density
+            and not write_blocked
+            and not unmatched_requested_item_keys
+        )
+        if write_review_required:
+            next_action = (
+                "Review the high-density formula page-window plan before writing formulas; "
+                "prefer cached LaTeX or explicit page-window backfill instead of a full-document OCR run."
+            )
         summary = {
             "papers": processed,
             "selected": selected,
