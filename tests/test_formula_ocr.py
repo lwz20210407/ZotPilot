@@ -576,6 +576,7 @@ def test_extract_embedded_pdf_equation_number_accepts_mid_block_formula_numbers(
         "Logan, R.W., Hosford, W.F., 1980. Upper-bound anisotropic yield locus "
         "calculations assuming <111>-pencil glide. Int. J. Mech. Sci. 22 (7), 419–430."
     ) == ""
+    assert _extract_embedded_pdf_equation_number("Materials 12 (4) (2019) 609.") == ""
     assert _extract_embedded_pdf_equation_number("Sci. Adv. 8 (32) (2022) eabp9096.") == ""
     assert _extract_embedded_pdf_equation_number(
         "The orientation relationship of (110)M // (110)T // (0002)HCP."

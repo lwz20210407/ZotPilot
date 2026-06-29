@@ -4418,6 +4418,13 @@ def _looks_like_bibliographic_issue_number_context(prefix: str, suffix: str) -> 
         and not (_has_formula_relation(prefix) or _has_formula_structure(prefix))
     ):
         return True
+    if (
+        re.match(r"^[\(（]\s*(?:18|19|20)\d{2}\s*[\)）]\s*(?:[A-Za-z]*\d|[,，.;:：])", normalized_suffix)
+        and not (_has_formula_relation(prefix) or _has_formula_structure(prefix))
+    ):
+        title_words = WORD_RE.findall(normalized_prefix)
+        if 1 <= len(title_words) <= 8 and re.search(r"\b\d{1,4}\s*$", normalized_prefix):
+            return True
     if not re.match(r"^[,，]\s*\d+\s*[-–—]\s*\d+", normalized_suffix):
         return False
     if re.search(r"\((?:18|19|20)\d{2}\)", normalized_suffix):
