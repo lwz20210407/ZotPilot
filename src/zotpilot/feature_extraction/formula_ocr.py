@@ -3253,7 +3253,11 @@ def _candidate_can_receive_structured_gap_inferred_equation_number(candidate: Fo
     if not candidate.source.startswith(("mineru_", "pdf_extract_kit_")):
         return False
     visible_text = _latex_visible_text(candidate.latex)
-    return _has_formula_relation(visible_text) or ("=" in visible_text and _has_formula_structure(visible_text))
+    return (
+        _has_formula_relation(visible_text)
+        or ("=" in visible_text and _has_formula_structure(visible_text))
+        or (_has_formula_structure(visible_text) and len(MATH_SYMBOL_RE.findall(visible_text)) >= 3)
+    )
 
 
 def _can_infer_missing_sequence_numbers_between(
@@ -3267,7 +3271,12 @@ def _can_infer_missing_sequence_numbers_between(
     )
     if not has_explicit_unnumbered:
         return True
-    return previous[:2] == current[:2] and previous[0] == "hyphen"
+    if previous[:2] != current[:2]:
+        return False
+    if previous[0] == "hyphen":
+        return True
+    missing_numbers = _missing_sequence_numbers_between(previous, current)
+    return previous[0] == "" and len(pending) == 1 and len(missing_numbers) == 1
 
 
 def _equation_number_sequence_value(equation_number: str) -> tuple[str, int, int] | None:
@@ -5352,7 +5361,15 @@ def _has_complex_formula_relation(text: str) -> bool:
     for match in re.finditer(rf"(?:=|≈|≤|≥|≠|:=|\\leq?|\\geq?|\\approx|\\sim|{PRIVATE_USE_RELATION_RE})", text or ""):
         left = text[max(0, match.start() - 220):match.start()]
         right = text[match.end():match.end() + 220]
-        if _formula_relation_side_signal(left) >= 4 and _formula_relation_side_signal(right) >= 4:
+        left_signal = _formula_relation_side_signal(left)
+        right_signal = _formula_relation_side_signal(right)
+        if left_signal >= 4 and right_signal >= 4:
+            return True
+        if (
+            match.group(0) in {r"\ge", r"\geq", r"\le", r"\leq"}
+            and left_signal >= 4
+            and re.search(r"^\s*[-+−]?\s*(?:\d|\\?[A-Za-zΑ-Ωα-ω])", right)
+        ):
             return True
     return False
 
@@ -5857,6 +5874,8 @@ def _latex_second_lhs_is_used_by_first_rhs(first_latex: str, second_latex: str) 
     second_lhs = _latex_lhs(second_latex)
     if not first_rhs or not second_lhs:
         return False
+    if not _latex_lhs_likely_named_definition(second_lhs):
+        return False
     lhs_tokens = _formula_match_tokens(second_lhs)
     rhs_tokens = _formula_match_tokens(first_rhs)
     if not lhs_tokens or not rhs_tokens or len(lhs_tokens) > 8:
@@ -5865,6 +5884,22 @@ def _latex_second_lhs_is_used_by_first_rhs(first_latex: str, second_latex: str) 
     if len(lhs_tokens) <= 2:
         return shared == len(lhs_tokens)
     return shared / len(lhs_tokens) >= 0.75
+
+
+def _latex_lhs_likely_named_definition(latex: str) -> bool:
+    visible_text = _normalize_space(_latex_visible_text(latex))
+    if not visible_text:
+        return False
+    if re.search(r"\\(?:frac|sqrt|int|sum|prod|left|right|overline|bar)\b|[+\-−*/]", visible_text):
+        return False
+    if re.search(r"\b(?:sin|cos|tan|exp|log|ln)\b", visible_text):
+        return False
+    compact = re.sub(r"\\(?:mathrm|mathcal|mathbf|pmb|boldsymbol)\s*\{([^{}]+)\}", r"\1", visible_text)
+    compact = re.sub(r"\\[A-Za-z]+", "X", compact)
+    compact = re.sub(r"[\s{}_^,.'′]+|\d+", "", compact)
+    return bool(re.fullmatch(r"[A-Za-zΑ-Ωα-ω()]+", compact)) and bool(
+        re.search(r"[A-Za-zΑ-Ωα-ω]", compact)
+    )
 
 
 def _latex_lhs(latex: str) -> str:

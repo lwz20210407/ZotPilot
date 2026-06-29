@@ -3886,6 +3886,43 @@ def test_infer_missing_equation_numbers_does_not_number_explicit_unnumbered_cand
     assert inferred[1].equation_number_status == "unnumbered"
 
 
+def test_infer_missing_equation_numbers_fills_single_regular_structured_unnumbered_gap():
+    candidates = [
+        FormulaCandidate(
+            6,
+            (519, 647, 760, 666),
+            r"w(d)=d",
+            0.95,
+            equation_number="(22)",
+            latex=r"w(d)=d",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            6,
+            (519, 766, 873, 789),
+            r"d \\in W",
+            0.95,
+            latex=r"d \in { \mathcal { W } } : = \left\{ \tilde { d } \in H ^ { 1 } \right\}",
+            equation_number_status="unnumbered",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            7,
+            (109, 200, 383, 219),
+            r"\\sigma=g(d)C",
+            0.95,
+            equation_number="(24)",
+            latex=r"\pmb { \sigma } = g ( d ) \mathbb { C }",
+            source="mineru_content_list",
+        ),
+    ]
+
+    inferred = _infer_missing_equation_numbers_between_numbered(candidates)
+
+    assert inferred[1].equation_number == "(23)"
+    assert inferred[1].equation_number_status == "inferred"
+
+
 def test_infer_missing_hyphen_chapter_gap_numbers_structured_unnumbered_candidates():
     candidates = [
         FormulaCandidate(
@@ -5847,6 +5884,85 @@ def test_merge_split_formula_candidates_merges_definition_continuation_used_by_m
     assert len(merged) == 1
     assert merged[0].equation_number == "(10)"
     assert "f ( \\xi ) =" in merged[0].latex
+
+
+def test_merge_split_formula_candidates_keeps_wide_independent_number_gap_rows():
+    assert _has_formula_relation(r"D _ { c z o v } / D _ { c z o v } ^ { f } \ge 1")
+
+    candidates = [
+        FormulaCandidate(
+            page_num=22,
+            bbox=(382, 331, 602, 370),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"\sigma _ { 2 } = \frac { L \left( \sigma _ { 1 } - \sigma _ { 3 } \right) "
+                r"+ \sigma _ { 1 } + \sigma _ { 3 } } { 2 }"
+            ),
+            equation_number="(2-20)",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(409, 394, 571, 433),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"\frac { \sigma _ { 1 } - \sigma _ { 3 } } { 2 } = "
+                r"\frac { \overline { { \sigma } } } { \sqrt { L ^ { 2 } + 3 } }"
+            ),
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(382, 453, 635, 496),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"\frac { 2 \tau _ { \mathrm { m a x } } } { \overline { { \sigma } } } = "
+                r"\frac { 2 } { \sqrt { L ^ { 2 } + 3 } }"
+            ),
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(183, 521, 788, 567),
+            raw_text="",
+            confidence=0.95,
+            latex=r"D _ { L O U } = C \int _ { 0 } ^ { \tilde { \varepsilon } } d \overline { \varepsilon }",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(415, 780, 561, 801),
+            raw_text="",
+            confidence=0.95,
+            latex=r"D _ { c z o v } / D _ { c z o v } ^ { f } \ge 1",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(176, 802, 792, 848),
+            raw_text="",
+            confidence=0.95,
+            latex=r"{ \cal D } _ { C I O U } = C \int _ { { \cal T } \geq 0 } d \overline { \varepsilon }",
+            equation_number="(2-25)",
+            source="mineru_content_list",
+        ),
+    ]
+
+    merged = _merge_split_formula_candidates(candidates)
+    inferred = _infer_missing_equation_numbers_between_numbered(merged)
+
+    assert len(merged) == 6
+    assert [candidate.equation_number for candidate in inferred] == [
+        "(2-20)",
+        "(2-21)",
+        "(2-22)",
+        "(2-23)",
+        "(2-24)",
+        "(2-25)",
+    ]
 
 
 def test_merge_split_formula_candidates_merges_definition_continuation_when_number_is_on_second_line():
