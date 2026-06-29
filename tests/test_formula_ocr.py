@@ -3736,6 +3736,28 @@ def test_infer_missing_equation_numbers_does_not_number_explicit_unnumbered_cand
     assert inferred[1].equation_number_status == "unnumbered"
 
 
+def test_infer_missing_equation_numbers_clears_inferred_duplicate_provided_number():
+    candidates = [
+        FormulaCandidate(1, (10, 100, 40, 120), r"a=b", 0.9, equation_number="(10)", latex=r"a=b"),
+        FormulaCandidate(1, (10, 140, 40, 160), r"b=c", 0.9, equation_number="(11)", latex=r"b=c"),
+        FormulaCandidate(
+            1,
+            (10, 180, 40, 200),
+            r"c=d",
+            0.9,
+            equation_number="(11)",
+            equation_number_status="inferred",
+            latex=r"c=d",
+        ),
+        FormulaCandidate(1, (10, 220, 40, 240), r"d=e", 0.9, equation_number="(12)", latex=r"d=e"),
+    ]
+
+    inferred = _infer_missing_equation_numbers_between_numbered(candidates)
+
+    assert [candidate.equation_number for candidate in inferred] == ["(10)", "(11)", "", "(12)"]
+    assert inferred[2].equation_number_status == "unnumbered"
+
+
 def test_mineru_cache_pdf_numbered_fallback_respects_doc_limit(tmp_path):
     pdf_path = tmp_path / "paper.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")

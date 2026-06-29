@@ -3068,7 +3068,30 @@ def _infer_missing_equation_numbers_between_numbered(candidates: list[FormulaCan
         pending = []
         pending_blocked = False
 
-    return _repair_shifted_equation_numbers_between_anchors(inferred)
+    return _clear_duplicate_inferred_equation_numbers(
+        _repair_shifted_equation_numbers_between_anchors(inferred)
+    )
+
+
+def _clear_duplicate_inferred_equation_numbers(candidates: list[FormulaCandidate]) -> list[FormulaCandidate]:
+    provided_numbers = {
+        candidate.equation_number
+        for candidate in candidates
+        if candidate.equation_number and candidate.equation_number_status != "inferred"
+    }
+    if not provided_numbers:
+        return candidates
+    cleared: list[FormulaCandidate] = []
+    for candidate in candidates:
+        if (
+            candidate.equation_number
+            and candidate.equation_number_status == "inferred"
+            and candidate.equation_number in provided_numbers
+        ):
+            cleared.append(replace(candidate, equation_number="", equation_number_status="unnumbered"))
+        else:
+            cleared.append(candidate)
+    return cleared
 
 
 def _repair_shifted_equation_numbers_between_anchors(
