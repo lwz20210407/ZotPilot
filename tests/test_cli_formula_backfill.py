@@ -11,11 +11,13 @@ def test_print_json_falls_back_for_narrow_stdout(monkeypatch):
     from zotpilot.cli import _print_json
 
     class GbkOnlyStdout:
+        encoding = "ascii"
+
         def __init__(self):
             self.text = ""
 
         def write(self, value):
-            value.encode("gbk")
+            value.encode(self.encoding)
             self.text += value
             return len(value)
 
@@ -29,6 +31,58 @@ def test_print_json_falls_back_for_narrow_stdout(monkeypatch):
 
     assert "\\u00ae" in fake_stdout.text
     assert json.loads(fake_stdout.text)["title"] == "A® paper"
+
+
+def test_print_json_avoids_partial_narrow_stdout(monkeypatch):
+    from zotpilot.cli import _print_json
+
+    class PartialFailingStdout:
+        encoding = "ascii"
+
+        def __init__(self):
+            self.text = ""
+
+        def write(self, value):
+            self.text += value
+            value.encode(self.encoding)
+            return len(value)
+
+        def flush(self):
+            return None
+
+    fake_stdout = PartialFailingStdout()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    _print_json({"title": "A® paper"}, ensure_ascii=False, indent=2)
+
+    assert fake_stdout.text.count("{") == 1
+    assert json.loads(fake_stdout.text)["title"] == "A® paper"
+
+
+def test_print_json_escapes_non_utf8_stdout(monkeypatch):
+    from zotpilot.cli import _print_json
+
+    class GbkStdout:
+        encoding = "gbk"
+
+        def __init__(self):
+            self.text = ""
+
+        def write(self, value):
+            value.encode(self.encoding)
+            self.text += value
+            return len(value)
+
+        def flush(self):
+            return None
+
+    fake_stdout = GbkStdout()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    _print_json({"title": "EN‐AW 6082‐T6"}, ensure_ascii=False, indent=2)
+
+    assert "\\u2010" in fake_stdout.text
+    assert json.loads(fake_stdout.text)["title"] == "EN‐AW 6082‐T6"
 
 
 def test_estimate_formula_backfill_cli_ignores_simpletex_auth_for_read_only_estimate(capsys):

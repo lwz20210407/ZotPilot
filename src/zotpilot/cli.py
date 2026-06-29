@@ -133,14 +133,16 @@ def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
 
 def _print_json(data, *, indent: int | None = 2, ensure_ascii: bool = False) -> None:
     """Print CLI JSON without crashing on narrow Windows stdout encodings."""
+    stdout_encoding = (getattr(sys.stdout, "encoding", None) or "utf-8").lower().replace("_", "-")
+    if not ensure_ascii and stdout_encoding not in {"utf-8", "utf8"}:
+        ensure_ascii = True
     text = json.dumps(data, ensure_ascii=ensure_ascii, indent=indent)
     try:
-        sys.stdout.write(text)
-        sys.stdout.write("\n")
-    except UnicodeEncodeError:
-        safe_text = json.dumps(data, ensure_ascii=True, indent=indent)
-        sys.stdout.write(safe_text)
-        sys.stdout.write("\n")
+        text.encode(stdout_encoding)
+    except (LookupError, UnicodeEncodeError):
+        text = json.dumps(data, ensure_ascii=True, indent=indent)
+    sys.stdout.write(text)
+    sys.stdout.write("\n")
 
 
 def _import_register_secret_overrides(args, config_path: Path) -> bool:
