@@ -4081,6 +4081,8 @@ def _extract_pdf_block_equation_number(text: str) -> str:
     formatted_number = _format_pdf_equation_number(match.group("number"))
     if not formatted_number:
         return ""
+    if _looks_like_doi_or_url_reference_text(prefix):
+        return ""
     if _looks_like_reference_or_material_trailing_number(prefix, formatted_number):
         return ""
     if CAPTION_OR_REFERENCE_RE.search(prefix) or SECTION_HEADING_RE.match(prefix):
@@ -4653,6 +4655,13 @@ def _looks_like_embedded_prose_citation_context(prefix: str, suffix: str) -> boo
         return True
     suffix_words = len(WORD_RE.findall(suffix))
     return suffix_words >= 4 and math_signal_count <= max(5, prefix_words // 4)
+
+
+def _looks_like_doi_or_url_reference_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    return bool(
+        re.search(r"\b(?:https?://|doi\.org/|doi\s*:|10\.\d{4,9}/)", normalized, re.IGNORECASE)
+    )
 
 
 def _looks_like_equation_reference_label_context(prefix: str) -> bool:

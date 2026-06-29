@@ -591,6 +591,7 @@ def test_extract_embedded_pdf_equation_number_accepts_mid_block_formula_numbers(
         "Logan, R.W., Hosford, W.F., 1980. Upper-bound anisotropic yield locus "
         "calculations assuming <111>-pencil glide. Int. J. Mech. Sci. 22 (7)"
     ) == ""
+    assert _extract_pdf_block_equation_number("https://doi.org/10.1016/0022-5096(69)") == ""
     assert _extract_embedded_pdf_equation_number(
         "Two-dimensional (2D) elasticity theory is adopted to develop"
     ) == ""
