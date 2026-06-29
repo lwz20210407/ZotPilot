@@ -3489,6 +3489,8 @@ def _scan_pdf_equation_number_records_by_page(
                 continue
             if _looks_like_table_or_step_plain_number_record(record.text, record.number):
                 continue
+            if _looks_like_isolated_pdf_equation_number_fragment_record(record.text, record.number):
+                continue
             if _replace_duplicate_pdf_equation_record_if_better(record, records, standalone_records):
                 continue
             if _duplicates_pdf_equation_record(record, [*records, *standalone_records]):
@@ -3508,12 +3510,12 @@ def _scan_pdf_equation_number_records_by_page(
             records = [
                 existing
                 for existing in records
-                if not _is_suffix_fragment_of_split_chapter_record(existing, split_record)
+                if not _is_split_chapter_number_fragment_record(existing, split_record)
             ]
             standalone_records = [
                 existing
                 for existing in standalone_records
-                if not _is_suffix_fragment_of_split_chapter_record(existing, split_record)
+                if not _is_split_chapter_number_fragment_record(existing, split_record)
             ]
             if _duplicates_pdf_equation_record(split_record, [*records, *standalone_records]):
                 continue
@@ -3625,7 +3627,10 @@ def _split_chapter_equation_number_records(
         if prefix_match is None:
             continue
         prefix_fragment = prefix_normalized[: prefix_match.start()]
-        if not _looks_like_split_chapter_number_formula_prefix(prefix_fragment):
+        if not (
+            _looks_like_split_chapter_number_formula_prefix(prefix_fragment)
+            or _has_nearby_formula_entry_left_of_split_chapter_prefix(prefix_bbox, entries)
+        ):
             continue
         number = _format_pdf_equation_number(f"{prefix_match.group('head')}-{suffix_match.group('tail')}")
         if not number:
@@ -3644,6 +3649,26 @@ def _split_chapter_equation_number_records(
             )
         )
     return records
+
+
+def _has_nearby_formula_entry_left_of_split_chapter_prefix(
+    prefix_bbox: tuple[float, float, float, float],
+    entries: list[tuple[tuple[float, float, float, float], str, str]],
+) -> bool:
+    fragments: list[str] = []
+    for bbox, _text, normalized in entries:
+        if bbox == prefix_bbox:
+            continue
+        if not _bboxes_share_text_line(bbox, prefix_bbox, tolerance=18.0):
+            continue
+        x_gap = prefix_bbox[0] - bbox[2]
+        if x_gap < -2.0 or x_gap > 280.0:
+            continue
+        fragments.append(normalized)
+    if not fragments:
+        return False
+    combined = _normalize_space(" ".join(fragments))
+    return _looks_like_split_chapter_number_formula_prefix(combined)
 
 
 def _find_split_chapter_hyphen_entry(
@@ -3707,17 +3732,46 @@ def _is_suffix_fragment_of_split_chapter_record(
     record: _PdfEquationNumberRecord,
     split_record: _PdfEquationNumberRecord,
 ) -> bool:
-    split_token = split_record.number.strip("()")
+    split_token = unicodedata.normalize("NFKC", _normalize_equation_number_token(split_record.number)).strip("()（）")
     if "-" not in split_token:
         return False
     suffix = split_token.rsplit("-", 1)[1]
-    if record.number.strip("()") != suffix:
+    record_token = unicodedata.normalize("NFKC", _normalize_equation_number_token(record.number)).strip("()（）")
+    if record_token != suffix:
         return False
     if not _bboxes_share_text_line(record.bbox, split_record.bbox, tolerance=14.0):
         return False
     if abs(record.x_right - split_record.x_right) <= 4.0:
         return True
     return _bbox_intersection_area(record.bbox, split_record.bbox) > 0
+
+
+def _is_prefix_fragment_of_split_chapter_record(
+    record: _PdfEquationNumberRecord,
+    split_record: _PdfEquationNumberRecord,
+) -> bool:
+    split_token = unicodedata.normalize("NFKC", _normalize_equation_number_token(split_record.number)).strip("()（）")
+    if "-" not in split_token:
+        return False
+    prefix = split_token.split("-", 1)[0]
+    record_token = unicodedata.normalize("NFKC", _normalize_equation_number_token(record.number)).strip("()（）")
+    if record_token != prefix:
+        return False
+    if not _bboxes_share_text_line(record.bbox, split_record.bbox, tolerance=14.0):
+        return False
+    if _bbox_intersection_area(record.bbox, split_record.bbox) > 0:
+        return True
+    return 0.0 <= split_record.bbox[0] - record.bbox[2] <= 8.0
+
+
+def _is_split_chapter_number_fragment_record(
+    record: _PdfEquationNumberRecord,
+    split_record: _PdfEquationNumberRecord,
+) -> bool:
+    return (
+        _is_suffix_fragment_of_split_chapter_record(record, split_record)
+        or _is_prefix_fragment_of_split_chapter_record(record, split_record)
+    )
 
 
 def _bboxes_share_text_line(
@@ -4072,6 +4126,9 @@ def _standalone_formula_block_signal_count(text: str) -> int:
 
 
 def _extract_pdf_block_equation_number(text: str) -> str:
+    noisy_split_chapter_number = _extract_noisy_split_chapter_pdf_equation_number(text)
+    if noisy_split_chapter_number:
+        return noisy_split_chapter_number
     match = TRAILING_EQUATION_NUMBER_RE.search(text)
     if match is None:
         return ""
@@ -4080,6 +4137,14 @@ def _extract_pdf_block_equation_number(text: str) -> str:
         return ""
     formatted_number = _format_pdf_equation_number(match.group("number"))
     if not formatted_number:
+        return ""
+    split_chapter_number = _repair_trailing_split_chapter_pdf_equation_number(
+        prefix,
+        match.group("number"),
+    )
+    if split_chapter_number:
+        formatted_number = split_chapter_number
+    elif _looks_like_isolated_suffix_pdf_equation_number_fragment(prefix, match.group("number")):
         return ""
     if _looks_like_doi_or_url_reference_text(prefix):
         return ""
@@ -4112,6 +4177,109 @@ def _extract_pdf_block_equation_number(text: str) -> str:
     if word_hits > 20 and symbol_hits + greek_hits + private_math_hits + math_alnum_hits < 2:
         return ""
     return formatted_number
+
+
+def _extract_noisy_split_chapter_pdf_equation_number(text: str) -> str:
+    """Extract ``(chapter-number)`` labels when PDF text inserts spaces/noise."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized:
+        return ""
+    chapter_pattern = re.compile(
+        r"[\(（]\s*(?P<head>\d{1,2})\s*[-–—－−]\s*"
+        r"(?P<tail>\d{1,2})\s*[\)）]"
+    )
+    for chapter_match in reversed(list(chapter_pattern.finditer(normalized))):
+        suffix = normalized[chapter_match.end() :]
+        if len(suffix) > 40:
+            continue
+        suffix_residue = re.sub(r"[\d\s_＿,.;:，。；：()[\]{}（）\-–—－−\ue000-\uf8ff]+", "", suffix)
+        if suffix_residue:
+            continue
+        formula_prefix = normalized[: chapter_match.start()]
+        if not _looks_like_split_chapter_number_formula_prefix(formula_prefix):
+            continue
+        return _format_pdf_equation_number(
+            f"{chapter_match.group('head')}-{chapter_match.group('tail')}"
+        )
+    return ""
+
+
+def _repair_trailing_split_chapter_pdf_equation_number(prefix: str, suffix_number: str) -> str:
+    """Recover chapter-style numbers split by noisy PDF text extraction."""
+    normalized_prefix = unicodedata.normalize("NFKC", _normalize_space(prefix or ""))
+    suffix = unicodedata.normalize("NFKC", _normalize_equation_number_token(suffix_number)).strip("()（）")
+    if not normalized_prefix or not suffix.isdigit():
+        return ""
+
+    chapter_pattern = re.compile(
+        r"[\(（]\s*(?P<head>\d{1,2})\s*[-–—－−]\s*"
+        r"(?P<tail>\d{1,2})\s*[\)）]?"
+    )
+    for chapter_match in reversed(list(chapter_pattern.finditer(normalized_prefix))):
+        if chapter_match.group("tail") != suffix:
+            continue
+        formula_prefix = normalized_prefix[: chapter_match.start()]
+        if not _looks_like_split_chapter_number_formula_prefix(formula_prefix):
+            continue
+        return _format_pdf_equation_number(
+            f"{chapter_match.group('head')}-{chapter_match.group('tail')}"
+        )
+
+    trailing_prefix_match = re.search(
+        r"[\(（]\s*(?P<head>\d{1,2})\s*[-–—－−]\s*$",
+        normalized_prefix,
+    )
+    if trailing_prefix_match is None:
+        return ""
+    formula_prefix = normalized_prefix[: trailing_prefix_match.start()]
+    if not _looks_like_split_chapter_number_formula_prefix(formula_prefix):
+        return ""
+    return _format_pdf_equation_number(f"{trailing_prefix_match.group('head')}-{suffix}")
+
+
+def _looks_like_isolated_suffix_pdf_equation_number_fragment(prefix: str, number: str) -> bool:
+    """Reject low-information suffix fragments such as broken ``_ 16)`` text."""
+    normalized_number = unicodedata.normalize("NFKC", _normalize_equation_number_token(number)).strip("()（）")
+    if not normalized_number.isdigit() or int(normalized_number) < 10:
+        return False
+    normalized = unicodedata.normalize("NFKC", _normalize_space(prefix or ""))
+    if not normalized or len(normalized) > 40:
+        return False
+    if re.search(r"[_＿\ue000-\uf8ff]", normalized) is None:
+        return False
+    stripped = re.sub(r"[\d\s_＿,.;:，。；：()[\]{}（）\-–—－−\ue000-\uf8ff]+", "", normalized)
+    if stripped == "":
+        return True
+    if (
+        _has_formula_relation(normalized)
+        or _has_formula_structure(normalized)
+        or MATH_SYMBOL_RE.search(normalized)
+        or re.search(r"[A-Za-z\u4e00-\u9fffΑ-Ωα-ω∑∏∫√∞∂∇∆]", normalized)
+    ):
+        return False
+    return stripped == ""
+
+
+def _looks_like_isolated_pdf_equation_number_fragment_record(text: str, number: str) -> bool:
+    normalized_number = unicodedata.normalize("NFKC", _normalize_equation_number_token(number)).strip("()（）")
+    if not normalized_number.isdigit() or int(normalized_number) < 10:
+        return False
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized or len(normalized) > 64:
+        return False
+    if re.search(r"[_＿\ue000-\uf8ff]", normalized) is None:
+        return False
+    stripped = re.sub(r"[\d\s_＿,.;:，。；：()[\]{}（）\-–—－−\ue000-\uf8ff]+", "", normalized)
+    if stripped == "":
+        return True
+    if (
+        _has_formula_relation(normalized)
+        or _has_formula_structure(normalized)
+        or MATH_SYMBOL_RE.search(normalized)
+        or re.search(r"[A-Za-z\u4e00-\u9fffΑ-Ωα-ω∑∏∫√∞∂∇∆]", normalized)
+    ):
+        return False
+    return stripped == ""
 
 
 def _math_alnum_char_count(text: str) -> int:

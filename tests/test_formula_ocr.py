@@ -30,11 +30,14 @@ from zotpilot.feature_extraction.formula_ocr import (
     _formula_text_match_score,
     _has_formula_relation,
     _infer_missing_equation_numbers_between_numbered,
+    _is_prefix_fragment_of_split_chapter_record,
+    _is_suffix_fragment_of_split_chapter_record,
     _is_usable_structured_formula_latex,
     _limit_ocr_needed_candidates,
     _looks_like_bibliographic_issue_number_record,
     _looks_like_equation_reference_prose_candidate,
     _looks_like_high_density_unnumbered_text_layer_noise,
+    _looks_like_isolated_pdf_equation_number_fragment_record,
     _merge_inline_equation_record_with_formula_blocks,
     _merge_number_only_pdf_candidates_with_latex_candidates,
     _merge_split_formula_candidates,
@@ -46,6 +49,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _scan_pdf_equation_number_records_by_page,
     _should_stop_formula_batch,
     _simpletex_app_headers,
+    _split_chapter_equation_number_records,
     _split_multirow_independent_formula_candidates,
     _zotero_storage_cache_scan,
     count_formula_provider_calls,
@@ -1455,6 +1459,89 @@ def test_inline_equation_number_record_does_not_merge_cjk_formula_explanation():
     assert "epsilon_f" in merged.text
     assert "无量纲" not in merged.text
     assert "当前应变率" not in merged.text
+
+
+def test_pdf_block_equation_number_repairs_split_chapter_number_fragment():
+    text = "4 = J 2 = Y （２ （２ － １２） \ue5d2 \ue5cf － １２）"
+
+    assert _extract_pdf_block_equation_number(text) == "(2-12)"
+
+
+def test_pdf_block_equation_number_rejects_isolated_suffix_fragment():
+    text = "＿ １６） \ue5d2 \ue5cf １６）"
+
+    assert _extract_pdf_block_equation_number(text) == ""
+
+
+def test_split_chapter_equation_number_records_accept_label_only_prefix_with_left_formula():
+    page_blocks = [
+        ((221.7, 360.9, 236.8, 366.7), "４ ＝"),
+        ((447.5, 357.9, 456.1, 365.0), "（２"),
+        ((457.4, 358.7, 460.2, 360.2), "－"),
+        ((462.2, 357.9, 475.9, 364.9), "１２）"),
+    ]
+
+    records = _split_chapter_equation_number_records(page_blocks, page_width=600.0, page_height=800.0)
+
+    assert [record.number for record in records] == ["(2-12)"]
+
+
+def test_split_chapter_suffix_fragment_match_normalizes_fullwidth_digits():
+    suffix = _PdfEquationNumberRecord(
+        "(１２)",
+        386.0,
+        475.9,
+        False,
+        (221.7, 357.9, 475.9, 413.1),
+        "formula （２ － １２）",
+        600.0,
+        800.0,
+    )
+    split = _PdfEquationNumberRecord(
+        "(2-12)",
+        361.5,
+        475.9,
+        False,
+        (447.5, 357.9, 475.9, 365.0),
+        "（２ － １２）",
+        600.0,
+        800.0,
+    )
+
+    assert _is_suffix_fragment_of_split_chapter_record(suffix, split)
+
+
+def test_split_chapter_prefix_fragment_match_normalizes_fullwidth_digits():
+    prefix = _PdfEquationNumberRecord(
+        "(２)",
+        386.0,
+        456.1,
+        False,
+        (221.7, 357.9, 456.1, 413.1),
+        "formula （２",
+        600.0,
+        800.0,
+    )
+    split = _PdfEquationNumberRecord(
+        "(2-12)",
+        361.5,
+        475.9,
+        False,
+        (447.5, 357.9, 475.9, 365.0),
+        "（２ － １２）",
+        600.0,
+        800.0,
+    )
+
+    assert _is_prefix_fragment_of_split_chapter_record(prefix, split)
+
+
+def test_isolated_pdf_equation_number_fragment_record_rejects_broken_suffix():
+    assert _looks_like_isolated_pdf_equation_number_fragment_record(
+        "＿ １６） \ue5d2 \ue5cf １６）",
+        "(16)",
+    )
+    assert not _looks_like_isolated_pdf_equation_number_fragment_record("x = y (16)", "(16)")
 
 
 def test_standalone_then_inline_merge_expands_long_fragmented_formula():
