@@ -2365,6 +2365,7 @@ class TestFormulaBackfill:
             "missing_equation_number_total": 1,
             "large_equation_number_gap_count": 0,
             "equation_number_regression_count": 0,
+            "duplicate_equation_number_count": 0,
             "paper_count": 1,
         }
         assert result["summary"]["candidate_quality_blocking_source_totals"] == (
@@ -2388,6 +2389,7 @@ class TestFormulaBackfill:
                 "missing_equation_number_total": 1,
                 "large_equation_number_gap_count": 0,
                 "equation_number_regression_count": 0,
+                "duplicate_equation_number_count": 0,
                 "duplicate_equation_numbers": [],
                 "equation_number_sequence_breaks": [
                     {

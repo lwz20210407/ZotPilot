@@ -1194,6 +1194,10 @@ def _formula_candidate_quality_blocking_row(
             "equation_number_regression_count",
             0,
         ),
+        "duplicate_equation_number_count": candidate_audit.get(
+            "duplicate_equation_number_count",
+            0,
+        ),
         "duplicate_equation_numbers": candidate_audit.get("duplicate_equation_numbers", []),
         "equation_number_sequence_breaks": candidate_audit.get(
             "equation_number_sequence_breaks",
@@ -1258,6 +1262,7 @@ def _formula_candidate_quality_source_totals(
         "missing_equation_number_total",
         "large_equation_number_gap_count",
         "equation_number_regression_count",
+        "duplicate_equation_number_count",
     ]
     totals = {field: 0 for field in fields}
     totals["paper_count"] = len(rows)
