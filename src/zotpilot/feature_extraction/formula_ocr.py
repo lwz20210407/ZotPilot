@@ -1792,7 +1792,7 @@ def _record_formula_number_cue(record: dict[str, Any]) -> str:
         return ""
     text = str(record.get("text") or record.get("content") or "")
     normalized = _normalize_space(text)
-    if not normalized or "$" in normalized or len(normalized) > 120:
+    if not normalized or "$" in normalized or len(normalized) > 80:
         return ""
     matches = re.findall(r"[（(]\s*\d+(?:\.\d+)?\s*[)）]", normalized)
     numbers = {_format_equation_number_token(match[1:-1].strip()) for match in matches}
@@ -1803,12 +1803,22 @@ def _record_formula_number_cue(record: dict[str, Any]) -> str:
     integer_match = re.fullmatch(r"\((\d+)\)", number)
     if integer_match is not None and int(integer_match.group(1)) >= 100:
         return ""
-    cue_context = re.search(
-        r"(?:式|ʽ|formula|equation|eq\.?)",
-        normalized,
-        re.IGNORECASE,
+    if re.fullmatch(r"[（(]\s*\d+(?:\.\d+)?\s*[)）]", normalized):
+        return number
+    label_pattern = (
+        r"(?:式|公式|方程|编号|formula|equation|eq\.?)"
+        r"\s*[:：]?\s*[（(]\s*\d+(?:\.\d+)?\s*[)）]"
     )
-    return number if cue_context else ""
+    if re.fullmatch(label_pattern, normalized, flags=re.IGNORECASE):
+        return number
+    if len(normalized) <= 40 and CJK_CHAR_RE.search(normalized):
+        cjk_intro_pattern = (
+            r".{0,20}(?:如|见|由|按|根据)?式"
+            r"\s*[（(]\s*\d+(?:\.\d+)?\s*[)）]\s*(?:所示|如下|为|可得)?"
+        )
+        if re.fullmatch(cjk_intro_pattern, normalized):
+            return number
+    return ""
 
 
 def _assign_adjacent_text_equation_number_cues(
@@ -4291,7 +4301,7 @@ def _extract_embedded_pdf_equation_number(text: str) -> str:
             continue
         if CAPTION_OR_REFERENCE_RE.search(prefix) or SECTION_HEADING_RE.match(prefix):
             continue
-        if re.search(r"(?:\b(?:eq\.?|equation)|式)\s*$", prefix, flags=re.IGNORECASE):
+        if _looks_like_equation_reference_label_context(prefix):
             continue
         compact_prefix = re.sub(r"[\s,.;:，。；：\x00-\x1f]+", "", prefix)
         if not (
@@ -4643,6 +4653,19 @@ def _looks_like_embedded_prose_citation_context(prefix: str, suffix: str) -> boo
         return True
     suffix_words = len(WORD_RE.findall(suffix))
     return suffix_words >= 4 and math_signal_count <= max(5, prefix_words // 4)
+
+
+def _looks_like_equation_reference_label_context(prefix: str) -> bool:
+    normalized = _normalize_space(prefix)
+    if re.search(r"(?:\b(?:eqs?\.?|equations?)|式)\s*$", normalized, flags=re.IGNORECASE):
+        return True
+    tail = normalized[-120:]
+    match = re.search(r"\b(?:eqs?\.?|equations?)\b(?P<after>.*)$", tail, flags=re.IGNORECASE)
+    if match is None:
+        return False
+    after = match.group("after")
+    after = re.sub(r"\b(?:and|or|to)\b", "", after, flags=re.IGNORECASE)
+    return re.fullmatch(r"[\s,.;:()（）\[\]\d.\-–—±]*", after) is not None
 
 
 def _looks_like_crystallographic_plane_relation_text(text: str) -> bool:

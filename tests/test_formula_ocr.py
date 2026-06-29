@@ -581,6 +581,12 @@ def test_extract_embedded_pdf_equation_number_accepts_mid_block_formula_numbers(
     assert _extract_embedded_pdf_equation_number(
         "The orientation relationship of (110)M // (110)T // (0002)HCP."
     ) == ""
+    assert _extract_embedded_pdf_equation_number(
+        "In Eqs. (6) and (7) G ij denotes the metric tensor of the base vectors"
+    ) == ""
+    assert _extract_embedded_pdf_equation_number(
+        "Furthermore, Eqs. (41), (44), (46), (51) and (52) lead to the differential"
+    ) == ""
     assert _extract_pdf_block_equation_number(
         "Logan, R.W., Hosford, W.F., 1980. Upper-bound anisotropic yield locus "
         "calculations assuming <111>-pencil glide. Int. J. Mech. Sci. 22 (7)"
@@ -1078,6 +1084,62 @@ def test_mineru_cache_provider_reads_content_list_formula_latex(tmp_path):
     assert candidates[0].latex == r"\sigma = E\epsilon"
     assert candidates[0].source == "mineru_content_list"
     assert count_formula_provider_calls(candidates) == 0
+
+
+def test_mineru_cache_provider_assigns_adjacent_standalone_number_label(tmp_path):
+    cache_dir = tmp_path / "mineru-cache" / "ITEM123"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "content_list.json").write_text(
+        json.dumps([
+            {"type": "text", "page_idx": 0, "bbox": [100, 100, 130, 115], "text": "(1)"},
+            {
+                "type": "equation",
+                "page_idx": 0,
+                "bbox": [100, 130, 300, 160],
+                "text": r"$$E = mc^2$$",
+            },
+        ]),
+        encoding="utf-8",
+    )
+    provider = create_formula_candidate_provider(
+        "mineru_cache",
+        config=SimpleNamespace(formula_candidate_cache_dirs=str(tmp_path / "mineru-cache")),
+    )
+
+    candidates = provider.extract_candidates(tmp_path / "paper.pdf", item_key="ITEM123")
+
+    assert [candidate.equation_number for candidate in candidates] == ["(1)"]
+
+
+def test_mineru_cache_provider_ignores_adjacent_equation_reference_prose(tmp_path):
+    cache_dir = tmp_path / "mineru-cache" / "ITEM123"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "content_list.json").write_text(
+        json.dumps([
+            {
+                "type": "text",
+                "page_idx": 0,
+                "bbox": [100, 100, 460, 118],
+                "text": "Taking into account Eq. (44) the strain increment is given by",
+            },
+            {
+                "type": "equation",
+                "page_idx": 0,
+                "bbox": [100, 132, 360, 170],
+                "text": r"$$\Delta\gamma_{\mathrm{iso}} = a\Delta\gamma$$",
+            },
+        ]),
+        encoding="utf-8",
+    )
+    provider = create_formula_candidate_provider(
+        "mineru_cache",
+        config=SimpleNamespace(formula_candidate_cache_dirs=str(tmp_path / "mineru-cache")),
+    )
+
+    candidates = provider.extract_candidates(tmp_path / "paper.pdf", item_key="ITEM123")
+
+    assert len(candidates) == 1
+    assert candidates[0].equation_number == ""
 
 
 def test_mineru_cache_provider_normalizes_bracketed_chapter_equation_number(tmp_path):

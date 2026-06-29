@@ -729,6 +729,13 @@ def _formula_candidate_audit(candidates: list) -> dict[str, object]:
         and text_layer_candidate_count == len(candidates)
     ):
         equation_number_warnings.add("text_layer_high_density_requires_structured_cache")
+    if (
+        structured_cache_candidate_count >= TEXT_LAYER_HIGH_DENSITY_REVIEW_THRESHOLD
+        and structured_cache_candidate_count == len(candidates)
+        and cached_latex_count == len(candidates)
+        and not equation_numbers
+    ):
+        equation_number_warnings.add("structured_cache_high_density_missing_equation_numbers")
     return {
         "candidate_count": len(candidates),
         "text_layer_candidate_count": text_layer_candidate_count,
@@ -958,6 +965,7 @@ _BLOCKING_CANDIDATE_REVIEW_WARNINGS = frozenset({
     "equation_number_regression",
     "large_equation_number_gap",
     "missing_equation_number_gap",
+    "structured_cache_high_density_missing_equation_numbers",
     "text_layer_high_density_requires_structured_cache",
 })
 
@@ -968,6 +976,7 @@ _NUMBERING_CANDIDATE_REVIEW_WARNINGS = frozenset({
     "equation_number_regression",
     "large_equation_number_gap",
     "missing_equation_number_gap",
+    "structured_cache_high_density_missing_equation_numbers",
 })
 
 
@@ -1134,6 +1143,8 @@ def _formula_candidate_quality_severity(
         return "cached_latex_quality"
     if "cached_latex_missing_equation_numbers" in reason_set:
         return "cached_latex_numbering"
+    if "structured_cache_high_density_missing_equation_numbers" in reason_set:
+        return "structured_cache_numbering"
     if "duplicate_equation_numbers" in reason_set:
         return "duplicate_numbering"
     if "large_equation_number_gap" in reason_set:

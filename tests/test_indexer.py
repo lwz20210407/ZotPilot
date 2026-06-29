@@ -2703,6 +2703,51 @@ class TestFormulaBackfill:
         assert result["candidate_quality_blocking_paper_count"] == 0
         assert result["candidate_quality_blocking_papers"] == []
 
+    def test_estimate_formula_backfill_blocks_high_density_unnumbered_structured_cache(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Formula-heavy paper", "Auth", 2024, pdf_path)
+        candidates = [
+            FormulaCandidate(
+                page_num=1 + index // 8,
+                bbox=(0, index * 10, 100, index * 10 + 8),
+                raw_text=rf"x_{{{index}}}=y_{{{index}}}+1",
+                confidence=0.95,
+                equation_number_status="unnumbered",
+                latex=rf"x_{{{index}}}=y_{{{index}}}+1",
+                source="mineru_content_list",
+            )
+            for index in range(81)
+        ]
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(**self._hash_config().__dict__)
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.estimate_formula_backfill(candidate_preview_limit=0)
+
+        audit = result["results"][0]["candidate_audit"]
+        assert audit["numbered_count"] == 0
+        assert audit["unnumbered_count"] == 81
+        assert audit["equation_number_warnings"] == [
+            "structured_cache_high_density_missing_equation_numbers"
+        ]
+        assert result["candidate_quality_blocking_paper_count"] == 1
+        assert result["candidate_quality_blocking_papers"][0]["review_reasons"] == [
+            "structured_cache_high_density_missing_equation_numbers"
+        ]
+        assert result["candidate_quality_blocking_papers"][0]["candidate_quality_severity"] == (
+            "structured_cache_numbering"
+        )
+
     def test_estimate_formula_backfill_promotes_duplicate_equation_numbers_to_warning(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer
