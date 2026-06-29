@@ -3058,7 +3058,10 @@ def _infer_missing_equation_numbers_between_numbered(candidates: list[FormulaCan
         sequence = _equation_number_sequence_value(candidate.equation_number)
         if sequence is None:
             if not candidate.equation_number:
-                if _candidate_can_receive_inferred_equation_number(candidate):
+                if (
+                    _candidate_can_receive_inferred_equation_number(candidate)
+                    or _candidate_can_receive_structured_gap_inferred_equation_number(candidate)
+                ):
                     pending.append((index, candidate))
                 else:
                     pending_blocked = True
@@ -3066,7 +3069,15 @@ def _infer_missing_equation_numbers_between_numbered(candidates: list[FormulaCan
 
         if previous_sequence is not None and pending and not pending_blocked:
             missing_numbers = _missing_sequence_numbers_between(previous_sequence, sequence)
-            if missing_numbers and len(missing_numbers) == len(pending):
+            if (
+                missing_numbers
+                and len(missing_numbers) == len(pending)
+                and _can_infer_missing_sequence_numbers_between(
+                    previous_sequence,
+                    sequence,
+                    pending,
+                )
+            ):
                 for (pending_index, pending_candidate), equation_number in zip(pending, missing_numbers):
                     inferred[pending_index] = replace(
                         pending_candidate,
@@ -3185,6 +3196,8 @@ def _candidate_items_in_reading_order(candidates: list[FormulaCandidate]) -> lis
         max_x0 = max(x0_values)
         if max_x0 - min_x0 < 240.0:
             continue
+        if min_x0 > 120.0 and max_x0 - min_x0 < 320.0:
+            continue
         threshold = (min_x0 + max_x0) / 2.0
         if any(value <= threshold for value in x0_values) and any(value > threshold for value in x0_values):
             column_thresholds[page_num] = threshold
@@ -3230,6 +3243,31 @@ def _candidate_can_receive_inferred_equation_number(candidate: FormulaCandidate)
         return False
     visible_text = _latex_visible_text(candidate.latex)
     return _has_formula_relation(visible_text) or ("=" in visible_text and _has_formula_structure(visible_text))
+
+
+def _candidate_can_receive_structured_gap_inferred_equation_number(candidate: FormulaCandidate) -> bool:
+    if candidate.equation_number_status != "unnumbered":
+        return False
+    if not candidate.latex.strip():
+        return False
+    if not candidate.source.startswith(("mineru_", "pdf_extract_kit_")):
+        return False
+    visible_text = _latex_visible_text(candidate.latex)
+    return _has_formula_relation(visible_text) or ("=" in visible_text and _has_formula_structure(visible_text))
+
+
+def _can_infer_missing_sequence_numbers_between(
+    previous: tuple[str, int, int],
+    current: tuple[str, int, int],
+    pending: list[tuple[int, FormulaCandidate]],
+) -> bool:
+    has_explicit_unnumbered = any(
+        candidate.equation_number_status == "unnumbered"
+        for _index, candidate in pending
+    )
+    if not has_explicit_unnumbered:
+        return True
+    return previous[:2] == current[:2] and previous[0] == "hyphen"
 
 
 def _equation_number_sequence_value(equation_number: str) -> tuple[str, int, int] | None:

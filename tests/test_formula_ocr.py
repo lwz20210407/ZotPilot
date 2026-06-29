@@ -3886,6 +3886,170 @@ def test_infer_missing_equation_numbers_does_not_number_explicit_unnumbered_cand
     assert inferred[1].equation_number_status == "unnumbered"
 
 
+def test_infer_missing_hyphen_chapter_gap_numbers_structured_unnumbered_candidates():
+    candidates = [
+        FormulaCandidate(
+            20,
+            (355, 864, 615, 889),
+            r"D_1 = x",
+            0.95,
+            equation_number="(2-15)",
+            latex=r"D_1 = x",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            21,
+            (437, 98, 562, 118),
+            r"D_2 = y",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"D_2 = y",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            21,
+            (306, 381, 686, 420),
+            r"L = z",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"L = z",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (253, 147, 759, 193),
+            r"C \int x = 1",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"C \int x = 1",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (300, 220, 620, 260),
+            r"M = N + 1",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"M = N + 1",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (382, 331, 602, 370),
+            r"\sigma_2 = f(L)",
+            0.95,
+            equation_number="(2-20)",
+            latex=r"\sigma_2 = f(L)",
+            source="mineru_content_list",
+        ),
+    ]
+
+    inferred = _infer_missing_equation_numbers_between_numbered(candidates)
+
+    assert [candidate.equation_number for candidate in inferred] == [
+        "(2-15)",
+        "(2-16)",
+        "(2-17)",
+        "(2-18)",
+        "(2-19)",
+        "(2-20)",
+    ]
+    assert [candidate.equation_number_status for candidate in inferred[1:5]] == [
+        "inferred",
+        "inferred",
+        "inferred",
+        "inferred",
+    ]
+
+
+def test_infer_missing_hyphen_gap_uses_single_column_order_for_centered_thesis_formulas():
+    candidates = [
+        FormulaCandidate(
+            20,
+            (413, 842, 562, 861),
+            r"D_1 = x",
+            0.95,
+            equation_number="(2-15)",
+            latex=r"D_1 = x",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            20,
+            (355, 864, 615, 889),
+            r"D_2 = y",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"D_2 = y",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            21,
+            (437, 98, 562, 118),
+            r"D_3 = z",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"D_3 = z",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            21,
+            (306, 381, 686, 420),
+            r"L = w",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"L = w",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (253, 147, 759, 193),
+            r"C \int w = 1",
+            0.95,
+            equation_number_status="unnumbered",
+            latex=r"C \int w = 1",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (382, 331, 602, 370),
+            r"\sigma_2 = f(L)",
+            0.95,
+            equation_number="(2-20)",
+            latex=r"\sigma_2 = f(L)",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (176, 802, 792, 848),
+            r"D_4 = q",
+            0.95,
+            equation_number="(2-25)",
+            latex=r"D_4 = q",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            22,
+            (433, 851, 559, 871),
+            r"D_5 = r",
+            0.95,
+            equation_number="(2-26)",
+            latex=r"D_5 = r",
+            source="mineru_content_list",
+        ),
+    ]
+
+    inferred = _infer_missing_equation_numbers_between_numbered(candidates)
+
+    assert [candidate.equation_number for candidate in inferred[:6]] == [
+        "(2-15)",
+        "(2-16)",
+        "(2-17)",
+        "(2-18)",
+        "(2-19)",
+        "(2-20)",
+    ]
+
+
 def test_infer_missing_equation_numbers_clears_inferred_duplicate_provided_number():
     candidates = [
         FormulaCandidate(1, (10, 100, 40, 120), r"a=b", 0.9, equation_number="(10)", latex=r"a=b"),
