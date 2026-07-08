@@ -6200,9 +6200,19 @@ def _should_merge_numbered_row_system_candidates(first: FormulaCandidate, second
     if first.page_num != second.page_num:
         return False
     if first.equation_number and second.equation_number:
-        return _should_merge_same_number_formula_candidates(first, second)
+        if _should_merge_same_number_formula_candidates(first, second):
+            return True
+        first_sequence = _equation_number_sequence_value(first.equation_number)
+        second_sequence = _equation_number_sequence_value(second.equation_number)
+        if (
+            first_sequence is None
+            or second_sequence is None
+            or first_sequence[:2] != second_sequence[:2]
+            or second_sequence[2] <= first_sequence[2] + 1
+        ):
+            return False
     if not first.equation_number or second.equation_number:
-        return False
+        return bool(first.equation_number and second.equation_number)
     vertical_gap = second.bbox[1] - first.bbox[3]
     if vertical_gap < -4.0 or vertical_gap > 8.0:
         return False
@@ -6280,6 +6290,8 @@ def _latex_second_lhs_is_used_by_first_rhs(first_latex: str, second_latex: str) 
     lhs_tokens = _formula_match_tokens(second_lhs)
     rhs_tokens = _formula_match_tokens(first_rhs)
     if not lhs_tokens or not rhs_tokens or len(lhs_tokens) > 8:
+        return False
+    if len(lhs_tokens) > 2 and lhs_tokens[0] not in rhs_tokens:
         return False
     shared = sum(1 for token in lhs_tokens if token in rhs_tokens)
     if len(lhs_tokens) <= 2:

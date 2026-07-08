@@ -6531,6 +6531,65 @@ def test_merge_split_formula_candidates_merges_numbered_row_system_continuations
     assert r"\nabla d" in merged[0].latex
 
 
+def test_merge_split_formula_candidates_keeps_adjacent_independent_function_definitions():
+    candidates = [
+        FormulaCandidate(
+            page_num=9,
+            bbox=(521.0, 717.0, 734.0, 738.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\sigma_y(\varepsilon^p,d)=\rho(d)[\sigma_0+H\varepsilon^p]",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=9,
+            bbox=(519.0, 789.0, 912.0, 824.0),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"f_d(\sigma,\varepsilon^p,d)=s'(d)\frac{1}{2}E^{-1}\sigma^2"
+                r"-\rho'(d)\psi_p(\varepsilon^p)-\frac{G_c}{c_w}\frac{1}{\ell}"
+            ),
+            equation_number="(43)",
+            source="mineru_content_list",
+        ),
+    ]
+
+    merged = _merge_split_formula_candidates(candidates)
+
+    assert len(merged) == 2
+    assert [candidate.equation_number for candidate in merged] == ["", "(43)"]
+
+
+def test_merge_split_formula_candidates_merges_contiguous_row_system_with_spurious_gap_number():
+    candidates = [
+        FormulaCandidate(
+            page_num=9,
+            bbox=(84.0, 639.0, 307.0, 662.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"K^{uu}(d^{k-1})\Delta u^k=-R^u(d^{k-1}),",
+            equation_number="(40)",
+            source="mineru_content_list_row",
+        ),
+        FormulaCandidate(
+            page_num=9,
+            bbox=(84.0, 662.0, 307.0, 685.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"K^{dd}(u^k)\Delta d^k=-R^d(u^k),",
+            equation_number="(42)",
+            source="mineru_content_list_row",
+        ),
+    ]
+
+    merged = _merge_split_formula_candidates(candidates)
+
+    assert len(merged) == 1
+    assert merged[0].equation_number == "(40)"
+    assert r"K^{dd}" in merged[0].latex
+
+
 def test_merge_number_only_pdf_candidates_transfers_number_to_nearby_latex_candidate():
     latex = (
         r"P _ { \mathrm { m } } = \left\{ \begin{array} { l l }"
