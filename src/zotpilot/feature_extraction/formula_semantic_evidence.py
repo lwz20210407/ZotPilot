@@ -44,10 +44,16 @@ _FORMULA_SIGNAL_RE = re.compile(
 _FORMULA_RELATION_RE = re.compile(r"(?:=|≤|≥|≈|∝|<|>|\\leq|\\geq|\\approx|\\sim)", re.IGNORECASE)
 _TEX_COMMAND_RE = re.compile(r"\\(?:frac|sum|int|sqrt|partial|dot|bar|tilde|hat|begin|end)\b")
 _EXPLICIT_REF_WINDOW_RE = re.compile(
-    r"(?:\b(?:eqs?\.?|equations?|formulae?|formulas?)\b|公式|方程|式)\s*[:：]?\s*.{0,140}",
+    r"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|公式|方程|式)\s*[:：]?\s*.{0,140}",
     re.IGNORECASE,
 )
 _PAREN_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)", re.IGNORECASE)
+_EXPLICIT_MARKER_NUMBER_RE = re.compile(
+    r"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|公式|方程|式)\s*"
+    r"(?:[\(:：]\s*)?"
+    r"([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
+    re.IGNORECASE,
+)
 _TRAILING_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)\s*$", re.IGNORECASE)
 _DOI_OR_REFERENCE_RE = re.compile(
     r"(?:\bdoi\b|https?://|references\b|bibliography\b|^\s*\[[0-9]+\]|参考文献)",
@@ -114,8 +120,13 @@ def extract_equation_references(text: str) -> list[str]:
 
     for window_match in _EXPLICIT_REF_WINDOW_RE.finditer(normalized_text):
         window = window_match.group(0)
+        window_numbers: list[tuple[int, str]] = []
+        for match in _EXPLICIT_MARKER_NUMBER_RE.finditer(window):
+            window_numbers.append((match.start(1), match.group(1)))
         for match in _PAREN_NUMBER_RE.finditer(window):
-            add(match.group(1))
+            window_numbers.append((match.start(1), match.group(1)))
+        for _position, raw_number in sorted(window_numbers):
+            add(raw_number)
 
     trailing = _TRAILING_NUMBER_RE.search(normalized_text)
     if trailing and _FORMULA_SIGNAL_RE.search(normalized_text):

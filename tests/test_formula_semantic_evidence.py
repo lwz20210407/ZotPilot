@@ -18,6 +18,7 @@ def test_extract_equation_references_requires_explicit_marker_or_formula_tail():
     assert extract_equation_references("The equation follows Rice (1976) and is given by Eq. (7).") == [
         "(7)"
     ]
+    assert extract_equation_references("The term is formalized in Eq. 2 (Ref 35).") == ["(2)"]
 
 
 def test_formula_semantic_evidence_summary_flags_unmatched_references():
