@@ -755,6 +755,8 @@ def _text_layer_candidate_safe_for_auto_merge(candidate: FormulaCandidate) -> bo
         return False
     if _looks_like_equation_reference_prose_candidate(normalized, candidate.equation_number):
         return False
+    if _looks_like_figure_or_table_reference_record(normalized, candidate.equation_number):
+        return False
     return True
 
 
@@ -4229,7 +4231,11 @@ def _scan_pdf_equation_number_records_by_page(
                 continue
             if _looks_like_bibliographic_issue_number_record(record.text, record.number):
                 continue
+            if _looks_like_figure_or_table_reference_record(record.text, record.number):
+                continue
             if _looks_like_table_or_step_plain_number_record(record.text, record.number):
+                continue
+            if _looks_like_bare_pdf_equation_number_fragment_record(record.text, record.number):
                 continue
             if _looks_like_isolated_pdf_equation_number_fragment_record(record.text, record.number):
                 continue
@@ -5503,6 +5509,22 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     return False
 
 
+def _looks_like_figure_or_table_reference_record(text: str, equation_number: str) -> bool:
+    """Reject figure/table cross-references misread as equation numbers."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number:
+        return False
+    if _has_formula_payload_signal(normalized):
+        return False
+    number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
+    reference_pattern = (
+        rf"\b(?:figs?|figures?|tables?|tabs?|schemes?|algorithms?|alg\.?|section|sec\.?)\.?"
+        rf"\s*[\(（]?\s*{number_pattern}\s*[\)）]?"
+    )
+    return bool(re.search(reference_pattern, normalized, re.IGNORECASE))
+
+
 def _looks_like_table_or_step_plain_number_record(text: str, equation_number: str) -> bool:
     """Reject plain-number table/procedure tokens misread as equations."""
     value = _regular_equation_number_value(equation_number)
@@ -5538,6 +5560,31 @@ def _looks_like_table_or_step_plain_number_record(text: str, equation_number: st
     if arrow_hits >= 2 and number_hits >= 3 and decimal_hits >= 2:
         return True
     return repeated_label_hits >= 3 and (decimal_hits >= 1 or material_or_table_label or number_hits >= 6)
+
+
+def _looks_like_bare_pdf_equation_number_fragment_record(text: str, equation_number: str) -> bool:
+    """Reject lone recovered equation-number tails that lack formula context."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number or len(normalized) > 32:
+        return False
+    if "(" in normalized or "（" in normalized:
+        return False
+    if _has_formula_payload_signal(normalized):
+        return False
+    number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
+    return bool(re.fullmatch(rf"\s*{number_pattern}\s*[\)）]?", normalized))
+
+
+def _has_formula_payload_signal(text: str) -> bool:
+    if _has_formula_relation(text) or _has_formula_structure(text):
+        return True
+    return bool(
+        MATH_SYMBOL_RE.search(text)
+        or PRIVATE_USE_MATH_GLYPH_RE.search(text)
+        or _math_alnum_char_count(text)
+        or re.search(r"[Α-Ωα-ω∑∏∫√∞∂∇∆]", text)
+    )
 
 
 def _looks_like_reference_or_material_trailing_number(prefix: str, equation_number: str) -> bool:

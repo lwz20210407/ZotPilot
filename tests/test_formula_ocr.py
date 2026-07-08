@@ -35,8 +35,10 @@ from zotpilot.feature_extraction.formula_ocr import (
     _is_suffix_fragment_of_split_chapter_record,
     _is_usable_structured_formula_latex,
     _limit_ocr_needed_candidates,
+    _looks_like_bare_pdf_equation_number_fragment_record,
     _looks_like_bibliographic_issue_number_record,
     _looks_like_equation_reference_prose_candidate,
+    _looks_like_figure_or_table_reference_record,
     _looks_like_high_density_unnumbered_text_layer_noise,
     _looks_like_isolated_pdf_equation_number_fragment_record,
     _looks_like_table_or_step_plain_number_record,
@@ -2086,6 +2088,19 @@ def test_table_or_step_plain_number_record_rejects_specimen_numeric_transition_r
     assert not _looks_like_table_or_step_plain_number_record(r"\sigma = E\epsilon (5)", "(5)")
 
 
+def test_figure_reference_record_rejects_parenthetical_number():
+    assert _looks_like_figure_or_table_reference_record("in Fig. (26).", "(26)")
+    assert _looks_like_figure_or_table_reference_record("Table 4", "(4)")
+    assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (26)", "(26)")
+
+
+def test_bare_pdf_equation_number_fragment_record_rejects_number_only_tails():
+    assert _looks_like_bare_pdf_equation_number_fragment_record("37e)", "(37e)")
+    assert _looks_like_bare_pdf_equation_number_fragment_record("38)", "(38)")
+    assert not _looks_like_bare_pdf_equation_number_fragment_record("(38)", "(38)")
+    assert not _looks_like_bare_pdf_equation_number_fragment_record(r"\sigma = E\epsilon (38)", "(38)")
+
+
 def test_repeated_regular_pdf_numbers_keep_first_reading_order_record():
     true_record = _PdfEquationNumberRecord(
         number="(1)",
@@ -4058,6 +4073,34 @@ def test_pdf_number_scan_skips_array_assignment_code_listing():
     scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
 
     assert [record.number for record in scan.records_by_page[1]] == ["(4)"]
+
+
+def test_pdf_number_scan_skips_figure_references_and_bare_number_tails():
+    class FakePage:
+        rect = SimpleNamespace(width=600.0, height=800.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (60.0, 120.0, 480.0, 142.0, "in Fig. (26)."),
+                    (60.0, 150.0, 480.0, 172.0, "37e)"),
+                    (60.0, 180.0, 480.0, 202.0, "38)"),
+                    (80.0, 220.0, 520.0, 245.0, r"\sigma = E \varepsilon (39)"),
+                ]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    assert [record.number for record in scan.records_by_page[1]] == ["(39)"]
 
 
 def test_infer_missing_equation_numbers_does_not_reuse_existing_number_outside_segment():
