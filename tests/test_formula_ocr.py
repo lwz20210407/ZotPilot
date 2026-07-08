@@ -4725,6 +4725,170 @@ def test_pdf_enrichment_releases_cache_number_mismatched_to_pdf_page(tmp_path):
     assert [candidate.equation_number for candidate in enriched] == ["(2.14)", "(2.15)"]
 
 
+def test_pdf_enrichment_corrects_same_page_ascii_number_position_mismatch(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=7,
+            bbox=(84, 78, 361, 107),
+            raw_text="",
+            confidence=0.95,
+            latex=r"u \in \underset { u \in V_i } { \operatorname { argmin } } E_i",
+            equation_number="(30)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(109, 200, 383, 219),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\sigma = g(d) C [\varepsilon - \varepsilon^p]",
+            equation_number="(24)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(577, 77, 886, 138),
+            raw_text="",
+            confidence=0.95,
+            latex=r"f_d(\sigma,p,d) := s'(d)\psi_e^*(\sigma)-\rho'(d)\psi_p(p)",
+            equation_number="(31)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        7: [
+            _PdfEquationNumberRecord(
+                number="(24)",
+                y_center=165.5,
+                x_right=262.2,
+                standalone=False,
+                bbox=(120.0, 156.0, 262.2, 174.0),
+                text="sigma = g(d) C [epsilon - epsilon p] (24)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(30)",
+                y_center=119.6,
+                x_right=500.3,
+                standalone=False,
+                bbox=(360.0, 110.0, 500.3, 130.0),
+                text="f d sigma p d := s prime d psi e star sigma (30)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(31)",
+                y_center=159.2,
+                x_right=500.3,
+                standalone=False,
+                bbox=(360.0, 150.0, 500.3, 170.0),
+                text="psi e star sigma := one half C inverse sigma dot sigma (31)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(23)",
+                y_center=69.6,
+                x_right=262.2,
+                standalone=True,
+                bbox=(250.0, 62.0, 262.2, 78.0),
+                text="(23)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["(23)", "(24)", "(30)"]
+
+
+def test_pdf_enrichment_position_correction_preserves_non_ascii_and_chapter_numbers(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=22,
+            bbox=(253, 147, 759, 193),
+            raw_text="",
+            confidence=0.95,
+            latex=r"C \int _0 ^{\varepsilon_f^p} \left(\frac{2\tau}{\bar\sigma}\right)d\varepsilon",
+            equation_number="(２)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=22,
+            bbox=(382, 331, 602, 370),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\sigma_2 = \frac{L(\sigma_1-\sigma_3)+\sigma_1}{1+L}",
+            equation_number="(2-20)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        22: [
+            _PdfEquationNumberRecord(
+                number="(２)",
+                y_center=118.0,
+                x_right=500.0,
+                standalone=False,
+                bbox=(240.0, 110.0, 500.0, 126.0),
+                text="C integral ... (２)",
+                page_width=595.0,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(2)",
+                y_center=130.0,
+                x_right=500.0,
+                standalone=False,
+                bbox=(240.0, 122.0, 500.0, 138.0),
+                text="C integral ... (2)",
+                page_width=595.0,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(2-20)",
+                y_center=245.0,
+                x_right=500.0,
+                standalone=False,
+                bbox=(240.0, 238.0, 500.0, 252.0),
+                text="sigma 2 = ... (2-20)",
+                page_width=595.0,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(21)",
+                y_center=275.0,
+                x_right=500.0,
+                standalone=False,
+                bbox=(240.0, 268.0, 500.0, 282.0),
+                text="nearby ascii regular number (21)",
+                page_width=595.0,
+                page_height=842.0,
+            ),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["(２)", "(2-20)"]
+
+
 def test_pdf_enrichment_does_not_steal_far_record_before_sequence_gap(tmp_path):
     candidates = [
         FormulaCandidate(

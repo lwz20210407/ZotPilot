@@ -2586,7 +2586,7 @@ def _enrich_candidate_equation_numbers_from_pdf(
         return candidates
     candidates = _release_candidate_numbers_mismatched_to_pdf_page(candidates, records_by_page)
     if all(candidate.equation_number for candidate in candidates):
-        return candidates
+        return _correct_structured_candidate_numbers_from_pdf_positions(candidates, records_by_page)
 
     enriched = _enrich_candidate_equation_numbers_from_pdf_page_order(candidates, records_by_page)
     enriched = _enrich_candidate_equation_numbers_from_pdf_text(enriched, records_by_page)
@@ -2656,7 +2656,7 @@ def _enrich_candidate_equation_numbers_from_pdf(
                 continue
             used_numbers.add(match_index)
             enriched[candidate_index] = replace(candidate, equation_number=ordered_numbers[match_index][0])
-    return enriched
+    return _correct_structured_candidate_numbers_from_pdf_positions(enriched, records_by_page)
 
 
 def _release_candidate_numbers_mismatched_to_pdf_page(
@@ -2678,6 +2678,207 @@ def _release_candidate_numbers_mismatched_to_pdf_page(
             continue
         released.append(replace(candidate, equation_number="", equation_number_status=""))
     return released
+
+
+def _correct_structured_candidate_numbers_from_pdf_positions(
+    candidates: list[FormulaCandidate],
+    records_by_page: dict[int, list[_PdfEquationNumberRecord]],
+) -> list[FormulaCandidate]:
+    """Repair same-page cache equation numbers that landed on the wrong formula block."""
+    corrected = list(candidates)
+    for page_num, records in records_by_page.items():
+        if len(records) < 2:
+            continue
+        page_items = [
+            (index, candidate)
+            for index, candidate in enumerate(corrected)
+            if candidate.page_num == page_num
+            and candidate.latex.strip()
+            and candidate.equation_number
+            and _is_structured_cache_candidate(candidate)
+            and _is_valid_bbox(candidate.bbox)
+            and candidate.equation_number_status != "inferred"
+        ]
+        if not page_items:
+            continue
+        candidate_threshold = _candidate_page_column_threshold(
+            [candidate for _index, candidate in page_items]
+        )
+        record_threshold = _pdf_record_page_column_threshold(records)
+        if candidate_threshold is None or record_threshold is None:
+            continue
+        assigned_numbers: dict[str, int] = {}
+        for _index, candidate in page_items:
+            if candidate.equation_number:
+                assigned_numbers[candidate.equation_number] = assigned_numbers.get(candidate.equation_number, 0) + 1
+        ordered_records = _pdf_equation_records_in_reading_order(records)
+        ordered_page_items = [
+            (page_items[local_index][0], candidate)
+            for local_index, candidate in _candidate_items_in_reading_order(
+                [candidate for _index, candidate in page_items]
+            )
+        ]
+        for candidate_index, candidate in ordered_page_items:
+            best_match = _nearest_pdf_record_for_structured_candidate_position(
+                candidate,
+                ordered_records,
+                candidate_threshold=candidate_threshold,
+                record_threshold=record_threshold,
+            )
+            if best_match is None:
+                continue
+            best_record, best_score, best_y_distance = best_match
+            if not _is_ascii_regular_equation_number(best_record.number):
+                continue
+            if candidate.equation_number and not _is_ascii_regular_equation_number(candidate.equation_number):
+                continue
+            if best_record.number == candidate.equation_number:
+                continue
+            target_occupancy = assigned_numbers.get(best_record.number, 0)
+            if target_occupancy > (1 if best_record.number == candidate.equation_number else 0):
+                continue
+            if best_y_distance > 55.0 or best_score > 74.0:
+                continue
+            if _looks_like_equation_reference_prose_candidate(best_record.text, best_record.number):
+                continue
+            current_score, current_y_distance = _best_pdf_record_position_score_for_number(
+                candidate,
+                ordered_records,
+                candidate.equation_number,
+                candidate_threshold=candidate_threshold,
+                record_threshold=record_threshold,
+            )
+            current_is_competitive = (
+                current_score < float("inf")
+                and best_score + 18.0 >= current_score
+                and best_y_distance + 25.0 >= current_y_distance
+            )
+            if current_is_competitive:
+                continue
+            corrected[candidate_index] = replace(
+                candidate,
+                equation_number=best_record.number,
+                equation_number_status="",
+            )
+            if candidate.equation_number:
+                assigned_numbers[candidate.equation_number] = max(
+                    0,
+                    assigned_numbers.get(candidate.equation_number, 0) - 1,
+                )
+            assigned_numbers[best_record.number] = assigned_numbers.get(best_record.number, 0) + 1
+    return corrected
+
+
+def _is_ascii_regular_equation_number(equation_number: str) -> bool:
+    return bool(re.fullmatch(r"\([0-9]+[A-Za-z]?\)", equation_number or ""))
+
+
+def _candidate_page_column_threshold(candidates: list[FormulaCandidate]) -> float | None:
+    if len(candidates) < 2:
+        return None
+    x0_values = [candidate.bbox[0] for candidate in candidates]
+    min_x0 = min(x0_values)
+    max_x0 = max(x0_values)
+    if max_x0 - min_x0 < 240.0:
+        return None
+    if min_x0 > 120.0 and max_x0 - min_x0 < 320.0:
+        return None
+    threshold = (min_x0 + max_x0) / 2.0
+    if any(value <= threshold for value in x0_values) and any(value > threshold for value in x0_values):
+        return threshold
+    return None
+
+
+def _pdf_record_page_column_threshold(records: list[_PdfEquationNumberRecord]) -> float | None:
+    if len(records) < 2:
+        return None
+    x_right_values = [record.x_right for record in records]
+    min_x = min(x_right_values)
+    max_x = max(x_right_values)
+    page_width = max((record.page_width for record in records), default=0.0)
+    if page_width > 0:
+        has_left_column = any(value <= page_width * 0.58 for value in x_right_values)
+        has_right_column = any(value >= page_width * 0.72 for value in x_right_values)
+        if has_left_column and has_right_column:
+            return (min_x + max_x) / 2.0
+    if max_x - min_x >= 180.0:
+        return (min_x + max_x) / 2.0
+    return None
+
+
+def _nearest_pdf_record_for_structured_candidate_position(
+    candidate: FormulaCandidate,
+    records: list[_PdfEquationNumberRecord],
+    *,
+    candidate_threshold: float | None,
+    record_threshold: float | None,
+) -> tuple[_PdfEquationNumberRecord, float, float] | None:
+    best: tuple[_PdfEquationNumberRecord, float, float] | None = None
+    for record in records:
+        score, y_distance = _pdf_record_position_score_for_structured_candidate(
+            candidate,
+            record,
+            candidate_threshold=candidate_threshold,
+            record_threshold=record_threshold,
+        )
+        if score == float("inf"):
+            continue
+        if best is None or score < best[1]:
+            best = (record, score, y_distance)
+    return best
+
+
+def _best_pdf_record_position_score_for_number(
+    candidate: FormulaCandidate,
+    records: list[_PdfEquationNumberRecord],
+    number: str,
+    *,
+    candidate_threshold: float | None,
+    record_threshold: float | None,
+) -> tuple[float, float]:
+    if not number:
+        return (float("inf"), float("inf"))
+    best_score = float("inf")
+    best_y_distance = float("inf")
+    for record in records:
+        if record.number != number:
+            continue
+        score, y_distance = _pdf_record_position_score_for_structured_candidate(
+            candidate,
+            record,
+            candidate_threshold=candidate_threshold,
+            record_threshold=record_threshold,
+        )
+        if score < best_score:
+            best_score = score
+            best_y_distance = y_distance
+    return best_score, best_y_distance
+
+
+def _pdf_record_position_score_for_structured_candidate(
+    candidate: FormulaCandidate,
+    record: _PdfEquationNumberRecord,
+    *,
+    candidate_threshold: float | None,
+    record_threshold: float | None,
+) -> tuple[float, float]:
+    if candidate_threshold is not None and record_threshold is not None:
+        candidate_column = 1 if candidate.bbox[0] > candidate_threshold else 0
+        record_column = 1 if record.x_right > record_threshold else 0
+        if candidate_column != record_column:
+            return (float("inf"), float("inf"))
+    y_center = (candidate.bbox[1] + candidate.bbox[3]) / 2.0
+    x_center = (candidate.bbox[0] + candidate.bbox[2]) / 2.0
+    if candidate.bbox_coordinate_space == "pdf":
+        candidate_y = y_center
+        candidate_x = x_center
+    else:
+        candidate_y = _candidate_y_to_pdf_space(candidate, y_center)
+        candidate_x = x_center * 0.761
+    y_distance = abs(candidate_y - record.y_center)
+    x_distance = abs(candidate_x - record.x_right)
+    score = y_distance + min(x_distance, 260.0) * 0.06
+    return score, y_distance
 
 
 def _enrich_candidate_equation_numbers_from_pdf_page_order(
