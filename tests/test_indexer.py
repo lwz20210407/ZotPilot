@@ -4150,7 +4150,7 @@ class TestFormulaBackfill:
         indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
 
         with patch("zotpilot.indexer.record_table_failure") as mock_record_failure:
-            n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+            n_chunks, n_tables, reason, stats, quality = indexer._index_extraction(
                 item,
                 extraction,
                 journal,
@@ -4160,6 +4160,8 @@ class TestFormulaBackfill:
         assert n_tables == 0
         assert reason == ""
         assert quality == "A"
+        assert stats["formula_index_status"] == "failed"
+        assert stats["formula_index_reason"] == "RuntimeError: formula boom"
         indexer.store.add_formulas.assert_called_once()
         mock_record_failure.assert_not_called()
         assert item.item_key not in journal.table_failures
@@ -4211,7 +4213,7 @@ class TestFormulaBackfill:
         indexer._pdf_hash = MagicMock(return_value="hash")
         indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
 
-        n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+        n_chunks, n_tables, reason, stats, quality = indexer._index_extraction(
             item,
             extraction,
             IndexJournal(tmp_path / "journal.json"),
@@ -4283,7 +4285,7 @@ class TestFormulaBackfill:
         indexer._extract_formula_candidates_for_item = MagicMock(return_value=[candidate])
         indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
 
-        n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+        n_chunks, n_tables, reason, stats, quality = indexer._index_extraction(
             item,
             extraction,
             IndexJournal(tmp_path / "journal.json"),
@@ -4293,6 +4295,9 @@ class TestFormulaBackfill:
         assert n_tables == 0
         assert reason == ""
         assert quality == "A"
+        assert stats["n_formulas"] == 1
+        assert stats["formula_index_status"] == "indexed"
+        assert stats["formula_index_reason"] == ""
         indexer.store.add_chunks.assert_called_once()
         indexer._recognize_formulas_for_item.assert_called_once_with(item, candidates=[candidate])
         indexer.store.add_formulas.assert_called_once()
@@ -4385,7 +4390,7 @@ class TestFormulaBackfill:
         indexer._extract_formula_candidates_for_item = MagicMock(return_value=candidates)
         indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
 
-        n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+        n_chunks, n_tables, reason, stats, quality = indexer._index_extraction(
             item,
             extraction,
             IndexJournal(tmp_path / "journal.json"),
@@ -4395,6 +4400,11 @@ class TestFormulaBackfill:
         assert n_tables == 0
         assert reason == ""
         assert quality == "A"
+        assert stats["formula_index_status"] == "skipped_candidate_review"
+        assert stats["formula_index_reason"] == "candidate_quality_review_required"
+        assert stats["formula_index_review_reasons"] == [
+            "semantic_evidence_unmatched_equation_references"
+        ]
         indexer.store.add_chunks.assert_called_once()
         indexer._recognize_formulas_for_item.assert_not_called()
         indexer.store.add_formulas.assert_not_called()

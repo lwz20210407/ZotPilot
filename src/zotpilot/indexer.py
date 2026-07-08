@@ -1684,6 +1684,9 @@ class IndexResult:
     reason: str = ""
     n_chunks: int = 0
     n_tables: int = 0
+    n_formulas: int = 0
+    formula_status: str = ""
+    formula_reason: str = ""
     quality_grade: str = ""  # A/B/C/D/F quality grade per document
 
 
@@ -4002,11 +4005,18 @@ class Indexer:
                 # Track quality distribution
                 if quality_grade in quality_distribution:
                     quality_distribution[quality_grade] += 1
+                n_formulas = extraction_stats.get("n_formulas", 0)
+                n_formulas = n_formulas if isinstance(n_formulas, int) else 0
+                formula_status = str(extraction_stats.get("formula_index_status", "") or "")
+                formula_reason = str(extraction_stats.get("formula_index_reason", "") or "")
 
                 if n_chunks > 0:
                     results.append(IndexResult(
                         item.item_key, item.title, "indexed",
                         n_chunks=n_chunks, n_tables=n_tables,
+                        n_formulas=n_formulas,
+                        formula_status=formula_status,
+                        formula_reason=formula_reason,
                         quality_grade=quality_grade))
                     progress(
                         "paper_finished",
@@ -4018,12 +4028,18 @@ class Indexer:
                         status="indexed",
                         n_chunks=n_chunks,
                         n_tables=n_tables,
+                        n_formulas=n_formulas,
+                        formula_status=formula_status,
+                        formula_reason=formula_reason,
                         quality_grade=quality_grade,
                     )
                 else:
                     empty_docs[item.item_key] = self._pdf_hash(item.pdf_path)
                     results.append(IndexResult(
                         item.item_key, item.title, "empty", reason=reason,
+                        n_formulas=n_formulas,
+                        formula_status=formula_status,
+                        formula_reason=formula_reason,
                         quality_grade=quality_grade))
                     progress(
                         "paper_finished",
@@ -4036,6 +4052,9 @@ class Indexer:
                         reason=reason,
                         n_chunks=n_chunks,
                         n_tables=n_tables,
+                        n_formulas=n_formulas,
+                        formula_status=formula_status,
+                        formula_reason=formula_reason,
                         quality_grade=quality_grade,
                     )
                 logger.debug(f"Completed {item.item_key}: {n_chunks} chunks, {n_tables} tables, quality {quality_grade}")  # noqa: E501
@@ -4163,6 +4182,12 @@ class Indexer:
             "empty": sum(1 for r in results if r.status == "empty"),
             "skipped": sum(1 for r in results if r.status == "skipped"),
             "already_indexed": len(indexed_ids),
+            "formulas_indexed": sum(r.n_formulas for r in results),
+            "formula_status_counts": dict(Counter(
+                r.formula_status
+                for r in results
+                if r.formula_status
+            )),
             "quality_distribution": quality_distribution,
             "extraction_stats": aggregated_extraction_stats,
         }
@@ -4406,11 +4431,15 @@ class Indexer:
         # tracked separately and must not poison table/figure completeness.
         table_figure_failure_this_run = False
         formula_failure_this_run = False
+        formula_index_status = "disabled"
+        formula_index_reason = ""
+        formula_index_review_reasons: list[str] = []
 
         # Store formulas if explicitly enabled. Phase A only covers text-layer
         # candidates; image/vector formulas are intentionally left for later.
         n_formulas = 0
         if getattr(self.config, "formula_ocr_enabled", False) is True:
+            formula_index_status = "not_started"
             try:
                 formulas = list(getattr(extraction, "formulas", []) or [])
                 candidates: list = []
@@ -4443,6 +4472,9 @@ class Indexer:
                     )
                     formula_failure_this_run = True
                     formulas = []
+                    formula_index_status = "skipped_candidate_review"
+                    formula_index_reason = "candidate_quality_review_required"
+                    formula_index_review_reasons = sorted(candidate_review_reasons)
                     skip_formula_storage = True
                 elif not formulas:
                     formulas = self._recognize_formulas_for_item(item, candidates=candidates)
@@ -4456,20 +4488,28 @@ class Indexer:
                 if skip_formula_storage:
                     pass
                 elif blocking_review_reasons:
+                    formula_index_status = "skipped_structural_review"
+                    formula_index_reason = "formula_structural_review_required"
+                    formula_index_review_reasons = sorted(blocking_review_reasons)
                     logger.warning(
                         "Formula indexing for %s needs structural review (%s); skipping formula storage",
                         item_key,
                         ", ".join(blocking_review_reasons),
                     )
-                else:
+                elif formulas:
                     self.store.add_formulas(item_key, doc_meta, formulas)
                     n_formulas = len(formulas)
+                    formula_index_status = "indexed"
                     logger.debug(f"  Extracted {n_formulas} formulas")
+                else:
+                    formula_index_status = "no_formula"
             except RateLimitError:
                 raise
             except Exception as e:
                 logger.warning(f"Formula OCR/storage failed for {item_key}: {e}")
                 formula_failure_this_run = True
+                formula_index_status = "failed"
+                formula_index_reason = f"{type(e).__name__}: {e}"
 
         # Store tables if enabled (skip layout artifacts)
         n_tables = 0
@@ -4519,8 +4559,15 @@ class Indexer:
         if journal is not None and not table_figure_failure_this_run:
             clear_table_failure(journal, item_key)
 
+        extraction_stats = dict(extraction.stats)
+        extraction_stats.update({
+            "n_formulas": n_formulas,
+            "formula_index_status": formula_index_status,
+            "formula_index_reason": formula_index_reason,
+            "formula_index_review_reasons": formula_index_review_reasons,
+        })
         logger.debug(f"Indexed {item.item_key}: {len(chunks)} chunks, {n_tables} tables, {n_figures} figures, {n_formulas} formulas, quality {quality_grade}")  # noqa: E501
-        return len(chunks), n_tables, "", extraction.stats, quality_grade
+        return len(chunks), n_tables, "", extraction_stats, quality_grade
 
     def index_document(self, item: ZoteroItem) -> int:
         """Index a single document. Returns number of chunks created."""

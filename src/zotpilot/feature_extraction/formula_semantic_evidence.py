@@ -55,6 +55,15 @@ _DOI_OR_REFERENCE_RE = re.compile(
 )
 
 
+def _looks_like_citation_year_number(value: str) -> bool:
+    """Return True for plain parenthetical years that should not be equation IDs."""
+    normalized = normalize_equation_number(value)
+    if not re.fullmatch(r"\d{4}", normalized):
+        return False
+    year = int(normalized)
+    return 1800 <= year <= 2099
+
+
 @dataclass(frozen=True)
 class FormulaSemanticEvidence:
     """A formula-like clue from an existing ZotPilot semantic chunk."""
@@ -97,6 +106,8 @@ def extract_equation_references(text: str) -> list[str]:
 
     def add(raw: str) -> None:
         number = normalize_equation_number(raw)
+        if _looks_like_citation_year_number(number):
+            return
         if number and number not in seen:
             seen.add(number)
             numbers.append(format_equation_number(number))
