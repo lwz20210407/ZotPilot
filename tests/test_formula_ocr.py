@@ -94,6 +94,14 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ：",
         "(3-6)",
     )
+    assert not _looks_like_equation_reference_prose_candidate(
+        "Eq. (76). MSE = 1/5 \\sum_i [\\varepsilon_f^{opt}(\\eta_i,L_i)-\\varepsilon_{f,i}]^2",
+        "(76)",
+    )
+    assert _looks_like_equation_reference_prose_candidate(
+        "According to Eq. (76), the parameter set with the lowest MSE is selected for validation.",
+        "(76)",
+    )
     assert not is_high_quality_formula_latex(
         r"\text{Figure 2. True stress-strain curves at different temperatures.}"
     )
@@ -159,6 +167,34 @@ def test_pdf_records_for_assignment_filters_cjk_formula_reference_lists():
         text="2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ：",
         page_width=600.0,
         page_height=800.0,
+    )
+
+    assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]
+
+
+def test_pdf_records_for_assignment_keeps_eq_intro_formula_blocks():
+    formula_record = _PdfEquationNumberRecord(
+        number="(76)",
+        y_center=142.6,
+        x_right=507.6,
+        standalone=False,
+        bbox=(45.1, 116.4, 507.6, 168.8),
+        text=(
+            "Eq. (76). MSE = 1 5 ∑5 [εf opt(ηi, Li) −εf,i]2 (76) "
+            "where εf opt denotes predicted value."
+        ),
+        page_width=595.0,
+        page_height=842.0,
+    )
+    reference_record = _PdfEquationNumberRecord(
+        number="(76)",
+        y_center=210.0,
+        x_right=507.6,
+        standalone=False,
+        bbox=(45.1, 196.0, 507.6, 224.0),
+        text="According to Eq. (76), the parameter set with the lowest MSE is selected for validation.",
+        page_width=595.0,
+        page_height=842.0,
     )
 
     assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]

@@ -771,6 +771,8 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         re.IGNORECASE,
     )
     if english_reference and word_hits >= 8:
+        if _equation_reference_intro_has_formula_payload(normalized, english_reference):
+            return False
         return True
     plain_parenthetical_reference = re.search(
         rf"\b(?:see|using|from|in|by|via|condition|conditions|case|step)\b"
@@ -786,6 +788,21 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         normalized,
     )
     return bool(cjk_reference and cjk_hits >= 8)
+
+
+def _equation_reference_intro_has_formula_payload(text: str, match: re.Match[str]) -> bool:
+    """Keep display equations whose PDF text starts with "Eq. (n)."."""
+    if match.start() > 8:
+        return False
+    if not re.match(r"^\s*(?:eqs?\.?|equations?)\s*[\(（]", text, re.IGNORECASE):
+        return False
+    payload = re.sub(r"^[\s.。:：,，;；-]+", "", text[match.end():])
+    if len(payload) < 4:
+        return False
+    head = payload[:240]
+    return _has_formula_relation(head) and (
+        _has_formula_structure(head) or len(MATH_SYMBOL_RE.findall(head)) >= 2
+    )
 
 
 class LocalFormulaOCRProvider:
