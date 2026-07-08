@@ -4413,8 +4413,39 @@ class Indexer:
         if getattr(self.config, "formula_ocr_enabled", False) is True:
             try:
                 formulas = list(getattr(extraction, "formulas", []) or [])
+                candidates: list = []
+                candidate_review_reasons: list[str] = []
+                semantic_evidence: dict[str, object] = {}
+                skip_formula_storage = False
                 if not formulas:
-                    formulas = self._recognize_formulas_for_item(item)
+                    candidates = self._extract_formula_candidates_for_item(item)
+                    candidate_audit = _formula_candidate_audit(candidates) if candidates else {}
+                    candidate_review_reasons = _formula_candidate_blocking_review_reasons(candidate_audit)
+                    semantic_evidence = _formula_semantic_evidence_for_item(
+                        self.store,
+                        item_key=item_key,
+                        candidates=candidates,
+                    )
+                else:
+                    semantic_evidence = _formula_semantic_evidence_for_item(
+                        self.store,
+                        item_key=item_key,
+                        candidates=formulas,
+                    )
+                semantic_review_reason = _formula_semantic_evidence_review_reason(semantic_evidence)
+                if semantic_review_reason and semantic_review_reason not in candidate_review_reasons:
+                    candidate_review_reasons.append(semantic_review_reason)
+                if candidate_review_reasons:
+                    logger.warning(
+                        "Formula indexing for %s needs candidate review (%s); skipping formula storage",
+                        item_key,
+                        ", ".join(sorted(candidate_review_reasons)),
+                    )
+                    formula_failure_this_run = True
+                    formulas = []
+                    skip_formula_storage = True
+                elif not formulas:
+                    formulas = self._recognize_formulas_for_item(item, candidates=candidates)
                 review_threshold = float(getattr(self.config, "formula_ocr_low_confidence_threshold", 0.0) or 0.0)
                 review_rows = self._formula_review_rows(
                     item=item,
@@ -4422,7 +4453,9 @@ class Indexer:
                     threshold=review_threshold,
                 )
                 blocking_review_reasons = _structural_formula_review_reasons(review_rows)
-                if blocking_review_reasons:
+                if skip_formula_storage:
+                    pass
+                elif blocking_review_reasons:
                     logger.warning(
                         "Formula indexing for %s needs structural review (%s); skipping formula storage",
                         item_key,

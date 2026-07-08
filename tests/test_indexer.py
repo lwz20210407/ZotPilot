@@ -4133,6 +4133,7 @@ class TestFormulaBackfill:
             latex=r"E = mc^2",
             equation_number="(1)",
         )
+        extraction.formulas = [formula]
         journal = IndexJournal(tmp_path / "journal.json")
         mark_committed(journal, item.item_key)
         record_table_failure(journal, item.item_key, "table storage: stale")
@@ -4199,6 +4200,7 @@ class TestFormulaBackfill:
             equation_number="(1)",
             source="pdf_text_equation_number_truncated",
         )
+        extraction.formulas = [formula]
         indexer = Indexer.__new__(Indexer)
         indexer.config = SimpleNamespace(formula_ocr_enabled=True)
         indexer.chunker = MagicMock()
@@ -4220,6 +4222,181 @@ class TestFormulaBackfill:
         assert reason == ""
         assert quality == "A"
         indexer.store.add_chunks.assert_called_once()
+        indexer.store.add_formulas.assert_not_called()
+
+    def test_index_extraction_writes_formula_chunks_after_candidate_gate(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.index_authority import IndexJournal
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import Chunk, ExtractedFormula, PageExtraction, ZoteroItem
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path, publication="Nature")
+        extraction = SimpleNamespace(
+            pages=[PageExtraction(page_num=1, markdown="Body text with Eq. (1)", char_start=0)],
+            full_markdown="Body text with Eq. (1)",
+            sections=[],
+            tables=[],
+            figures=[],
+            stats={"text_pages": 1, "ocr_pages": 0, "empty_pages": 0},
+            quality_grade="A",
+            formulas=[],
+        )
+        chunk = Chunk(
+            text="Body text with Eq. (1)",
+            chunk_index=0,
+            page_num=1,
+            char_start=0,
+            char_end=22,
+            section="body",
+        )
+        candidate = FormulaCandidate(
+            page_num=1,
+            bbox=(0, 0, 10, 10),
+            raw_text=r"E = mc^2",
+            confidence=0.95,
+            source="mineru_content_list",
+            latex=r"E = mc^2",
+            equation_number="(1)",
+        )
+        formula = ExtractedFormula(
+            page_num=1,
+            formula_index=0,
+            bbox=(0, 0, 10, 10),
+            latex=r"E = mc^2",
+            confidence=0.95,
+            equation_number="(1)",
+            source="mineru_content_list",
+        )
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(
+            formula_ocr_enabled=True,
+            formula_ocr_low_confidence_threshold=0.0,
+        )
+        indexer.chunker = MagicMock()
+        indexer.chunker.chunk.return_value = [chunk]
+        indexer.journal_ranker = MagicMock()
+        indexer.journal_ranker.lookup.return_value = "Q1"
+        indexer.store = MagicMock()
+        indexer._pdf_hash = MagicMock(return_value="hash")
+        indexer._extract_formula_candidates_for_item = MagicMock(return_value=[candidate])
+        indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
+
+        n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+            item,
+            extraction,
+            IndexJournal(tmp_path / "journal.json"),
+        )
+
+        assert n_chunks == 1
+        assert n_tables == 0
+        assert reason == ""
+        assert quality == "A"
+        indexer.store.add_chunks.assert_called_once()
+        indexer._recognize_formulas_for_item.assert_called_once_with(item, candidates=[candidate])
+        indexer.store.add_formulas.assert_called_once()
+
+    def test_index_extraction_blocks_semantic_evidence_formula_storage(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.index_authority import IndexJournal
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import Chunk, ExtractedFormula, PageExtraction, StoredChunk, ZoteroItem
+
+        class EvidenceStore:
+            def __init__(self) -> None:
+                self.add_chunks = MagicMock()
+                self.add_formulas = MagicMock()
+
+            def get_formula_evidence_chunks(self, item_key: str) -> list[StoredChunk]:
+                assert item_key == "DOC1"
+                return [
+                    StoredChunk(
+                        id="DOC1:text:0",
+                        text=(
+                            r"The calibrated response is discussed after Eq. (3), "
+                            r"where $\sigma = E\varepsilon$."
+                        ),
+                        metadata={"doc_id": "DOC1", "chunk_type": "text", "page_num": 4},
+                    )
+                ]
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path, publication="Nature")
+        extraction = SimpleNamespace(
+            pages=[PageExtraction(page_num=1, markdown="Body text", char_start=0)],
+            full_markdown="Body text",
+            sections=[],
+            tables=[],
+            figures=[],
+            stats={"text_pages": 1, "ocr_pages": 0, "empty_pages": 0},
+            quality_grade="A",
+            formulas=[],
+        )
+        chunk = Chunk(
+            text="Body text",
+            chunk_index=0,
+            page_num=1,
+            char_start=0,
+            char_end=9,
+            section="body",
+        )
+        candidates = [
+            FormulaCandidate(
+                page_num=1,
+                bbox=(0, 0, 10, 10),
+                raw_text=r"E = mc^2",
+                confidence=0.95,
+                source="mineru_content_list",
+                latex=r"E = mc^2",
+                equation_number="(1)",
+            ),
+            FormulaCandidate(
+                page_num=2,
+                bbox=(0, 20, 10, 30),
+                raw_text=r"\sigma = E\varepsilon",
+                confidence=0.95,
+                source="mineru_content_list",
+                latex=r"\sigma = E\varepsilon",
+                equation_number="(2)",
+            ),
+        ]
+        formula = ExtractedFormula(
+            page_num=1,
+            formula_index=0,
+            bbox=(0, 0, 10, 10),
+            latex=r"E = mc^2",
+            confidence=0.95,
+            equation_number="(1)",
+            source="mineru_content_list",
+        )
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(
+            formula_ocr_enabled=True,
+            formula_ocr_low_confidence_threshold=0.0,
+        )
+        indexer.chunker = MagicMock()
+        indexer.chunker.chunk.return_value = [chunk]
+        indexer.journal_ranker = MagicMock()
+        indexer.journal_ranker.lookup.return_value = "Q1"
+        indexer.store = EvidenceStore()
+        indexer._pdf_hash = MagicMock(return_value="hash")
+        indexer._extract_formula_candidates_for_item = MagicMock(return_value=candidates)
+        indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
+
+        n_chunks, n_tables, reason, _stats, quality = indexer._index_extraction(
+            item,
+            extraction,
+            IndexJournal(tmp_path / "journal.json"),
+        )
+
+        assert n_chunks == 1
+        assert n_tables == 0
+        assert reason == ""
+        assert quality == "A"
+        indexer.store.add_chunks.assert_called_once()
+        indexer._recognize_formulas_for_item.assert_not_called()
         indexer.store.add_formulas.assert_not_called()
 
     def test_formula_provider_error_is_tool_error_for_index_formulas(self, tmp_path):
