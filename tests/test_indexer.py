@@ -2792,6 +2792,62 @@ class TestFormulaBackfill:
         assert audit["duplicate_equation_number_count"] == 1
         assert audit["equation_number_warnings"] == ["duplicate_equation_numbers"]
 
+    def test_estimate_formula_backfill_allows_distant_numbering_restarts(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Chaptered paper", "Auth", 2024, pdf_path)
+        candidates = [
+            FormulaCandidate(
+                page_num=page,
+                bbox=(0, index * 10, 100, index * 10 + 8),
+                raw_text=rf"\sigma_{{{index}}}=E\epsilon",
+                confidence=0.95,
+                equation_number=number,
+                latex=rf"\sigma_{{{index}}}=E\epsilon",
+                source="text_layer",
+            )
+            for index, (number, page) in enumerate([
+                ("(1)", 27),
+                ("(2)", 32),
+                ("(3)", 36),
+                ("(4)", 37),
+                ("(4)", 71),
+                ("(5)", 40),
+                ("(6)", 40),
+                ("(6)", 72),
+                ("(7)", 40),
+                ("(7)", 72),
+                ("(8)", 41),
+                ("(8)", 72),
+                ("(9)", 41),
+                ("(10)", 42),
+                ("(11)", 42),
+                ("(12)", 74),
+            ])
+        ]
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = SimpleNamespace(**self._hash_config().__dict__)
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.estimate_formula_backfill(candidate_preview_limit=20)
+
+        audit = result["results"][0]["candidate_audit"]
+        assert audit["duplicate_equation_numbers"] == []
+        assert audit["duplicate_equation_number_count"] == 0
+        assert audit["repeated_equation_number_sections"] == ["(4)", "(6)", "(7)", "(8)"]
+        assert audit["repeated_equation_number_section_count"] == 4
+        assert audit["equation_number_warnings"] == []
+        assert result["candidate_quality_blocking_paper_count"] == 0
+
     def test_estimate_formula_backfill_page_window_uses_unlimited_candidate_extraction(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer

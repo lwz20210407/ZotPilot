@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import time
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -497,6 +497,41 @@ def _formula_candidate_audit_sort_key(indexed_candidate: tuple[int, object]) -> 
     return (1, (), page_num if isinstance(page_num, int) else 0, y0, x0, index)
 
 
+def _duplicate_equation_number_groups(candidates: list) -> tuple[list[str], list[str]]:
+    """Split true near-page duplicates from distant numbering restarts."""
+    occurrences_by_number: dict[str, list[int]] = defaultdict(list)
+    for candidate in candidates:
+        number = _formula_candidate_effective_equation_number(candidate)
+        if not number:
+            continue
+        page_num = getattr(candidate, "page_num", 0)
+        occurrences_by_number[number].append(page_num if isinstance(page_num, int) else 0)
+
+    review_duplicates: list[str] = []
+    repeated_sections: list[str] = []
+    for number, pages in occurrences_by_number.items():
+        if len(pages) <= 1:
+            continue
+        if _duplicate_equation_number_likely_section_restart(pages):
+            repeated_sections.append(number)
+        else:
+            review_duplicates.append(number)
+    return review_duplicates, repeated_sections
+
+
+def _duplicate_equation_number_likely_section_restart(pages: list[int]) -> bool:
+    valid_pages = sorted(page for page in pages if page > 0)
+    if len(valid_pages) != len(pages):
+        return False
+    if len(set(valid_pages)) != len(valid_pages):
+        return False
+    adjacent_gaps = [
+        current - previous
+        for previous, current in zip(valid_pages, valid_pages[1:])
+    ]
+    return bool(adjacent_gaps) and min(adjacent_gaps) >= 8
+
+
 def _equation_number_prefix_sort_key(prefix: str) -> tuple[tuple[int, object], ...]:
     parts = re.split(r"[.-]", prefix or "")
     return tuple(
@@ -679,12 +714,7 @@ def _formula_candidate_audit(candidates: list) -> dict[str, object]:
         for candidate in audit_ordered_candidates
         if (number := _formula_candidate_effective_equation_number(candidate))
     ]
-    number_counts = Counter(equation_numbers)
-    duplicate_numbers = [
-        number
-        for number, count in number_counts.items()
-        if count > 1
-    ]
+    duplicate_numbers, repeated_section_numbers = _duplicate_equation_number_groups(audit_ordered_candidates)
     text_layer_candidate_count = sum(
         1 for candidate in candidates
         if _formula_candidate_source(candidate) == "text_layer"
@@ -753,6 +783,8 @@ def _formula_candidate_audit(candidates: list) -> dict[str, object]:
         "unnumbered_count": unnumbered_count,
         "duplicate_equation_numbers": duplicate_numbers[:20],
         "duplicate_equation_number_count": len(duplicate_numbers),
+        "repeated_equation_number_sections": repeated_section_numbers[:20],
+        "repeated_equation_number_section_count": len(repeated_section_numbers),
         "truncated_source_count": truncated_source_count,
         "has_truncated_source": truncated_source_count > 0,
         "source_counts": dict(sorted(source_counts.items())),
