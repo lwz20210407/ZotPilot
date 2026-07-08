@@ -449,6 +449,7 @@ class MinerUCacheFormulaCandidateProvider:
         if candidates and not self._pdf_number_enrichment:
             candidates = _infer_single_leading_missing_equation_number(candidates)
             candidates = _infer_missing_equation_numbers_between_numbered(candidates)
+            candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
             candidates = [
                 candidate if candidate.equation_number_status else replace(
                     candidate,
@@ -474,6 +475,7 @@ class MinerUCacheFormulaCandidateProvider:
         candidates = _merge_split_formula_candidates(candidates)
         candidates = _infer_single_leading_missing_equation_number(candidates)
         candidates = _infer_missing_equation_numbers_between_numbered(candidates)
+        candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
         if candidates and not self._append_missing_pdf_candidates:
             candidates = _assign_equation_number_statuses_from_pdf(
                 pdf_path,
@@ -520,6 +522,7 @@ class MinerUCacheFormulaCandidateProvider:
         candidates = _merge_number_only_pdf_candidates_with_latex_candidates(candidates)
         candidates = _dedupe_candidates(candidates)
         candidates = _infer_missing_equation_numbers_between_numbered(candidates)
+        candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
         candidates = _merge_same_number_split_formula_candidates(candidates)
         candidates = _limit_ocr_needed_candidates(
             candidates,
@@ -699,6 +702,7 @@ class AutoFormulaCandidateProvider:
         combined = _dedupe_candidates([*structured_candidates, *text_candidates])
         combined = _merge_number_only_pdf_candidates_with_latex_candidates(combined)
         combined = _infer_missing_equation_numbers_between_numbered(combined)
+        combined = _drop_redundant_weak_pdf_number_candidates(combined)
         combined = _merge_same_number_split_formula_candidates(combined)
         if max_candidates_per_doc > 0 and len(combined) > max_candidates_per_doc:
             combined = combined[:max_candidates_per_doc]
@@ -5515,15 +5519,24 @@ def _looks_like_table_or_step_plain_number_record(text: str, equation_number: st
     number_hits = len(re.findall(number_pattern, normalized)) + len(
         re.findall(private_empty_paren_number_pattern, normalized)
     )
-    if number_hits < 4:
+    if number_hits < 2:
         return False
     decimal_hits = len(re.findall(r"[-+−]?\d+\.\d+", normalized))
     repeated_label_hits = len(
         re.findall(rf"\b[A-Za-zΑ-Ωα-ω]\s*{number_pattern}", normalized)
     )
     material_or_table_label = bool(
-        re.search(r"\b(?:AA|AZ|Al|Ti|Q)\s*\d{2,}[A-Za-z0-9-]*\b", normalized)
+        re.search(
+            r"\b(?:AA|AZ|Al|Ti|Q)\s*\d{2,}[A-Za-z0-9-]*\b"
+            r"|\b[A-Z]{1,4}(?:-[A-Z0-9]{1,4}){1,4}\b",
+            normalized,
+        )
     )
+    arrow_hits = len(re.findall(r"[→↔⇄]|->|<-|<->", normalized))
+    if material_or_table_label and number_hits >= 2 and decimal_hits >= 2:
+        return True
+    if arrow_hits >= 2 and number_hits >= 3 and decimal_hits >= 2:
+        return True
     return repeated_label_hits >= 3 and (decimal_hits >= 1 or material_or_table_label or number_hits >= 6)
 
 
@@ -6230,6 +6243,54 @@ def _dedupe_candidates(candidates: list[FormulaCandidate]) -> list[FormulaCandid
         elif _candidate_payload_score(candidate) > _candidate_payload_score(kept[duplicate_index]):
             kept[duplicate_index] = candidate
     return kept
+
+
+def _drop_redundant_weak_pdf_number_candidates(candidates: list[FormulaCandidate]) -> list[FormulaCandidate]:
+    """Remove weak bbox-only PDF number fragments when a nearby fuller candidate exists."""
+    if len(candidates) < 2:
+        return candidates
+    drop_indices: set[int] = set()
+    for index, candidate in enumerate(candidates):
+        if not _is_weak_pdf_number_candidate(candidate):
+            continue
+        if any(
+            other_index != index
+            and _same_nearby_equation_number(candidate, other)
+            and not _is_weak_pdf_number_candidate(other)
+            for other_index, other in enumerate(candidates)
+        ):
+            drop_indices.add(index)
+    if not drop_indices:
+        return candidates
+    return [candidate for index, candidate in enumerate(candidates) if index not in drop_indices]
+
+
+def _same_nearby_equation_number(first: FormulaCandidate, second: FormulaCandidate) -> bool:
+    return bool(
+        first.equation_number
+        and first.equation_number == second.equation_number
+        and abs(first.page_num - second.page_num) <= 1
+    )
+
+
+def _is_weak_pdf_number_candidate(candidate: FormulaCandidate) -> bool:
+    source = str(candidate.source or "")
+    if not source.startswith("pdf_text_equation_number"):
+        return False
+    if candidate.latex.strip() or not candidate.equation_number:
+        return False
+    body = _normalize_space((candidate.raw_text or "").replace(candidate.equation_number, " "))
+    body = re.sub(r"\(\s*\d+(?:[.\-]\d+)*[A-Za-z]?\s*\)", " ", body)
+    body = _normalize_space(body)
+    if not body:
+        return True
+    alnum_count = len(re.findall(r"[A-Za-z0-9Α-Ωα-ω]", body))
+    operator_count = len(re.findall(r"[=<>+\-−*/∫∑√]", body))
+    if alnum_count >= 2:
+        return False
+    if alnum_count >= 1 and operator_count >= 1:
+        return False
+    return len(body) <= 8
 
 
 def _candidate_payload_score(candidate: FormulaCandidate) -> tuple[int, int, float]:

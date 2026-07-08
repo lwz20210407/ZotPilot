@@ -18,6 +18,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _coerce_provider_result,
     _coerce_simpletex_response,
     _dedupe_candidates,
+    _drop_redundant_weak_pdf_number_candidates,
     _enrich_candidate_equation_numbers_from_pdf,
     _enrich_candidate_equation_numbers_from_pdf_text,
     _extract_block_signals,
@@ -38,6 +39,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _looks_like_equation_reference_prose_candidate,
     _looks_like_high_density_unnumbered_text_layer_noise,
     _looks_like_isolated_pdf_equation_number_fragment_record,
+    _looks_like_table_or_step_plain_number_record,
     _merge_inline_equation_record_with_formula_blocks,
     _merge_number_only_pdf_candidates_with_latex_candidates,
     _merge_split_formula_candidates,
@@ -2067,6 +2069,21 @@ def test_bibliographic_issue_number_record_rejects_merged_reference_line():
         "(6)",
     )
     assert not _looks_like_bibliographic_issue_number_record(r"\sigma = E\epsilon (7)", "(7)")
+
+
+def test_table_or_step_plain_number_record_rejects_specimen_numeric_transition_row():
+    text = (
+        "Q460-11 0.35 Q460-12 0.175(5) Q460-14 0.058 "
+        "-> -0.058(5)->0.088 Q460-16 0.116 -> -0.116(5)"
+    )
+    specimen_table = (
+        "0↔0.655 0↔0.655 QZ-W-3 QZ-W-3 QZ-W-4 "
+        "0↔0.3275 (5) 0↔0.3275 (5) QZ-W-4"
+    )
+
+    assert _looks_like_table_or_step_plain_number_record(text, "(5)")
+    assert _looks_like_table_or_step_plain_number_record(specimen_table, "(5)")
+    assert not _looks_like_table_or_step_plain_number_record(r"\sigma = E\epsilon (5)", "(5)")
 
 
 def test_repeated_regular_pdf_numbers_keep_first_reading_order_record():
@@ -7227,6 +7244,73 @@ def test_dedupe_candidates_prefers_cached_latex_over_bbox_only_duplicate():
     assert len(kept) == 1
     assert kept[0].source == "mineru_content_list"
     assert kept[0].latex == r"\sigma = E\epsilon"
+
+
+def test_drop_redundant_weak_pdf_number_candidate_keeps_full_neighbor():
+    weak_pdf_fragment = FormulaCandidate(
+        page_num=40,
+        bbox=(213, 396, 525, 430),
+        raw_text="= (3.28)",
+        confidence=0.72,
+        equation_number="(3.28)",
+        source="pdf_text_equation_number",
+    )
+    fuller_text_layer = FormulaCandidate(
+        page_num=41,
+        bbox=(268, 333, 542, 364),
+        raw_text="(1 ) 6 pi theta theta - = (3.28)",
+        confidence=0.93,
+        equation_number="(3.28)",
+        source="text_layer",
+    )
+    unique_pdf_candidate = FormulaCandidate(
+        page_num=42,
+        bbox=(200, 100, 500, 150),
+        raw_text="= (3.29)",
+        confidence=0.72,
+        equation_number="(3.29)",
+        source="pdf_text_equation_number",
+    )
+
+    kept = _drop_redundant_weak_pdf_number_candidates(
+        [weak_pdf_fragment, fuller_text_layer, unique_pdf_candidate]
+    )
+
+    assert kept == [fuller_text_layer, unique_pdf_candidate]
+
+
+def test_auto_provider_drops_redundant_weak_pdf_number_candidate(tmp_path, monkeypatch):
+    weak_pdf_fragment = FormulaCandidate(
+        page_num=40,
+        bbox=(213, 396, 525, 430),
+        raw_text="= (3.28)",
+        confidence=0.72,
+        equation_number="(3.28)",
+        source="pdf_text_equation_number",
+    )
+    fuller_text_layer = FormulaCandidate(
+        page_num=41,
+        bbox=(268, 333, 542, 364),
+        raw_text="(1 ) 6 pi theta theta - = (3.28)",
+        confidence=0.93,
+        equation_number="(3.28)",
+        source="text_layer",
+    )
+    provider = AutoFormulaCandidateProvider(pdf_number_enrichment=True, append_missing_pdf_candidates=True)
+    monkeypatch.setattr(
+        provider._structured_provider,
+        "extract_candidates",
+        lambda *args, **kwargs: [weak_pdf_fragment],
+    )
+    monkeypatch.setattr(
+        provider._text_provider,
+        "extract_candidates",
+        lambda *args, **kwargs: [fuller_text_layer],
+    )
+
+    candidates = provider.extract_candidates(tmp_path / "paper.pdf")
+
+    assert candidates == [fuller_text_layer]
 
 
 def test_extracted_formula_searchable_text_leads_with_context_before_latex():
