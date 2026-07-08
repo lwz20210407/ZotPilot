@@ -5494,16 +5494,25 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
     if not normalized or not normalized_number:
         return False
+    loose_number_pattern = _loose_equation_number_token_pattern(normalized_number)
     pattern = (
-        rf"\b\d{{1,4}}\s*[\(（]{{1,2}}\s*{re.escape(normalized_number)}\s*[\)）]"
+        rf"(?<!\d)(?:\d\s*){{1,4}}[\(（]{{1,2}}\s*{loose_number_pattern}\s*[\)）]"
         r"\s*[,，:：]\s*\d+\s*[-–—]\s*\d+"
     )
     match = re.search(pattern, normalized)
+    if match is None:
+        pattern = rf"(?<!\d)(?:\d\s*){{1,4}}[\(（]{{1,2}}\s*{loose_number_pattern}\s*[\)）]"
+        match = re.search(pattern, normalized)
     if match is None:
         return False
     prefix = normalized[: match.start()]
     suffix = normalized[match.end() :]
     abbrev_hits = len(re.findall(r"\b[A-Z][A-Za-z]{1,14}\.", prefix))
+    journal_context = re.search(
+        r"\b(?:J|Journal|Journals|Proc|Proceedings|Trans|Transactions|Micron|Technology|Science|Materials?)\.?\b",
+        prefix,
+        re.IGNORECASE,
+    )
     if re.search(r"(?:18|19|20)\d{2}", prefix) and not (
         _has_formula_relation(prefix) or _has_formula_structure(prefix)
     ):
@@ -5516,7 +5525,24 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
         return True
     if abbrev_hits >= 3 and re.search(r"\b(?:J|Journal|Proc|Proceedings|Trans|Transactions)\.?\b", prefix):
         return True
+    if journal_context and re.search(r"(?:18|19|20)\d{2}", prefix):
+        return True
     return False
+
+
+def _loose_equation_number_token_pattern(number: str) -> str:
+    parts = re.split(r"([.\-])", number)
+    pattern = ""
+    for part in parts:
+        if not part:
+            continue
+        if part == ".":
+            pattern += r"\s*[.:]\s*"
+        elif part == "-":
+            pattern += r"\s*[-–—－−]\s*"
+        else:
+            pattern += r"\s*".join(re.escape(char) for char in part)
+    return pattern
 
 
 def _looks_like_figure_or_table_reference_record(text: str, equation_number: str) -> bool:

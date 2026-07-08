@@ -2071,6 +2071,18 @@ def test_bibliographic_issue_number_record_rejects_merged_reference_line():
         "2009, 24((6):1345-1350.",
         "(6)",
     )
+    assert _looks_like_bibliographic_issue_number_record(
+        "2021, 114(1-2)",
+        "(1-2)",
+    )
+    assert _looks_like_bibliographic_issue_number_record(
+        "Journal of Advanced Manufacturing Technology, 2021, 113(9 - 10)",
+        "(9-10)",
+    )
+    assert _looks_like_bibliographic_issue_number_record(
+        "Micron, 2003, 34(3 - 5): 189-198.",
+        "(3-5)",
+    )
     assert not _looks_like_bibliographic_issue_number_record(r"\sigma = E\epsilon (7)", "(7)")
 
 
