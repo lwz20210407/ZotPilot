@@ -2573,6 +2573,24 @@ class TestFormulaBackfill:
         assert result["summary"]["candidate_quality_blocking_source_totals"] == (
             result["candidate_quality_blocking_source_totals"]
         )
+        assert result["formula_review_summary_count"] == 1
+        assert result["summary"]["formula_review_summary_count"] == 1
+        assert result["formula_review_summary"] == [
+            {
+                "item_key": "DOC1",
+                "title": "Impact paper",
+                "status": "needs_candidate_review",
+                "priority": 80,
+                "candidate_quality_severity": "minor_numbering_gap",
+                "review_reasons": ["missing_equation_number_gap"],
+                "candidate_count": 3,
+                "semantic_formula_unmatched_reference_count": 0,
+                "semantic_formula_unmatched_reference_numbers": [],
+                "equation_number_warnings": ["missing_equation_number_gap"],
+                "recommended_review_mode": "candidate_numbering_review",
+                "recommended_review_reason": "missing_equation_number_gap",
+            }
+        ]
         assert result["candidate_quality_blocking_papers"] == [
             {
                 "item_key": "DOC1",
@@ -2661,6 +2679,55 @@ class TestFormulaBackfill:
         assert row["missing_equation_number_total"] == 2
         assert row["candidate_quality_severity"] == "numbering_gap"
         assert result["candidate_quality_blocking_severity_counts"] == {"numbering_gap": 1}
+
+    def test_formula_review_summary_merges_scan_limited_candidate_rows(self):
+        from zotpilot.indexer import _formula_review_summary_rows
+
+        rows = _formula_review_summary_rows(
+            candidate_quality_rows=[
+                {
+                    "item_key": "DOC1",
+                    "title": "Dense paper",
+                    "candidate_count": 161,
+                    "candidate_quality_severity": "cached_latex_numbering",
+                    "review_reasons": ["cached_latex_missing_equation_numbers"],
+                    "semantic_formula_unmatched_reference_count": 2,
+                    "semantic_formula_unmatched_reference_numbers": ["(3)", "(4)"],
+                    "recommended_review": {
+                        "mode": "cached_latex_quality_review",
+                        "reason": "cached_latex_missing_equation_numbers",
+                    },
+                }
+            ],
+            dense_formula_rows=[
+                {
+                    "item_key": "DOC1",
+                    "title": "Dense paper",
+                    "candidate_count": 161,
+                    "estimated_provider_calls": 0,
+                    "high_density_trigger": "candidate_count",
+                }
+            ],
+            scan_limited_rows=[
+                {
+                    "item_key": "DOC1",
+                    "title": "Dense paper",
+                    "scanned_candidate_count": 161,
+                    "reason": "scan_limit",
+                }
+            ],
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["status"] == "estimate_incomplete_candidate_review"
+        assert rows[0]["priority"] == 5
+        assert rows[0]["review_reasons"] == [
+            "cached_latex_missing_equation_numbers",
+            "scan_limit",
+        ]
+        assert rows[0]["semantic_formula_unmatched_reference_numbers"] == ["(3)", "(4)"]
+        assert rows[0]["high_density_trigger"] == "candidate_count"
+        assert rows[0]["estimate_incomplete_reason"] == "scan_limit"
 
     def test_estimate_formula_backfill_blocks_low_quality_cached_latex(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
@@ -3768,6 +3835,14 @@ class TestFormulaBackfill:
             "uses_external_ocr": False,
             "evidence_source": "zotpilot_chroma_chunks",
         }
+        assert result["formula_review_summary"][0]["item_key"] == "DOC1"
+        assert result["formula_review_summary"][0]["priority"] == 10
+        assert result["formula_review_summary"][0]["semantic_formula_unmatched_reference_numbers"] == [
+            "(3)"
+        ]
+        assert result["formula_review_summary"][0]["recommended_review_mode"] == (
+            "semantic_formula_evidence_review"
+        )
 
     def test_estimate_formula_backfill_preview_can_include_all_candidates_without_truncation(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate

@@ -1568,6 +1568,134 @@ def _formula_candidate_quality_source_totals(
     return totals
 
 
+def _formula_review_summary_rows(
+    *,
+    candidate_quality_rows: list[dict[str, object]],
+    dense_formula_rows: list[dict[str, object]],
+    scan_limited_rows: list[dict[str, object]],
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    """Return compact per-paper review rows for large read-only estimates."""
+    severity_priority = {
+        "semantic_evidence_unmatched_references": 10,
+        "large_numbering_gap": 20,
+        "numbering_gap": 30,
+        "numbering_review": 40,
+        "duplicate_numbering": 45,
+        "structured_cache_required": 50,
+        "cached_latex_numbering": 60,
+        "cached_latex_quality": 65,
+        "fallback_truncated": 70,
+        "minor_numbering_gap": 80,
+        "mixed": 90,
+    }
+    rows: list[dict[str, object]] = []
+    scan_limited_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in scan_limited_rows
+        if row.get("item_key")
+    }
+    dense_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in dense_formula_rows
+        if row.get("item_key")
+    }
+    for row in candidate_quality_rows:
+        item_key = str(row.get("item_key", "") or "")
+        recommended_review = row.get("recommended_review", {})
+        recommended_mode = ""
+        recommended_reason = ""
+        if isinstance(recommended_review, dict):
+            recommended_mode = str(recommended_review.get("mode", "") or "")
+            recommended_reason = str(recommended_review.get("reason", "") or "")
+        severity = str(row.get("candidate_quality_severity", "") or "")
+        semantic_unmatched = int(row.get("semantic_formula_unmatched_reference_count", 0) or 0)
+        priority = severity_priority.get(severity, 100)
+        if semantic_unmatched > 0:
+            priority = min(priority, severity_priority["semantic_evidence_unmatched_references"])
+        review_reasons = row.get("review_reasons", [])
+        if not isinstance(review_reasons, list):
+            review_reasons = []
+        status = "needs_candidate_review"
+        scan_limited_row = scan_limited_by_key.get(item_key)
+        if scan_limited_row:
+            status = "estimate_incomplete_candidate_review"
+            priority = min(priority, 5)
+            scan_reason = str(scan_limited_row.get("reason", "scan_limit") or "scan_limit")
+            if scan_reason not in review_reasons:
+                review_reasons = [*review_reasons, scan_reason]
+        summary_row = {
+            "item_key": item_key,
+            "title": row.get("title", ""),
+            "status": status,
+            "priority": priority,
+            "candidate_quality_severity": severity,
+            "review_reasons": review_reasons,
+            "candidate_count": row.get("candidate_count", 0),
+            "semantic_formula_unmatched_reference_count": semantic_unmatched,
+            "semantic_formula_unmatched_reference_numbers": row.get(
+                "semantic_formula_unmatched_reference_numbers",
+                [],
+            ),
+            "equation_number_warnings": row.get("equation_number_warnings", []),
+            "recommended_review_mode": recommended_mode,
+            "recommended_review_reason": recommended_reason,
+        }
+        dense_row = dense_by_key.get(item_key)
+        if dense_row:
+            summary_row["high_density_trigger"] = dense_row.get("high_density_trigger", "")
+            summary_row["estimated_provider_calls"] = dense_row.get("estimated_provider_calls", 0)
+        if scan_limited_row:
+            summary_row["estimate_incomplete_reason"] = scan_limited_row.get("reason", "scan_limit")
+        rows.append(summary_row)
+    seen_item_keys = {
+        str(row.get("item_key", "") or "")
+        for row in rows
+        if row.get("item_key")
+    }
+    for row in dense_formula_rows:
+        if str(row.get("item_key", "") or "") in seen_item_keys:
+            continue
+        rows.append({
+            "item_key": row.get("item_key", ""),
+            "title": row.get("title", ""),
+            "status": "deferred_high_density",
+            "priority": 110,
+            "candidate_quality_severity": "high_density",
+            "review_reasons": ["high_density_formula_document"],
+            "candidate_count": row.get("candidate_count", 0),
+            "semantic_formula_unmatched_reference_count": 0,
+            "semantic_formula_unmatched_reference_numbers": [],
+            "equation_number_warnings": [],
+            "estimated_provider_calls": row.get("estimated_provider_calls", 0),
+            "high_density_trigger": row.get("high_density_trigger", ""),
+        })
+    for row in scan_limited_rows:
+        if str(row.get("item_key", "") or "") in seen_item_keys:
+            continue
+        rows.append({
+            "item_key": row.get("item_key", ""),
+            "title": row.get("title", ""),
+            "status": "estimate_incomplete",
+            "priority": 5,
+            "candidate_quality_severity": "scan_limited",
+            "review_reasons": [row.get("reason", "scan_limit")],
+            "candidate_count": row.get("scanned_candidate_count", 0),
+            "semantic_formula_unmatched_reference_count": 0,
+            "semantic_formula_unmatched_reference_numbers": [],
+            "equation_number_warnings": [],
+        })
+    return sorted(
+        rows,
+        key=lambda row: (
+            int(row.get("priority", 100) or 100),
+            -int(row.get("semantic_formula_unmatched_reference_count", 0) or 0),
+            -int(row.get("candidate_count", 0) or 0),
+            str(row.get("item_key", "")),
+        ),
+    )[:max(limit, 0)]
+
+
 def _structural_formula_review_reasons(review_rows: list[dict[str, object]]) -> list[str]:
     """Return structural review reasons that should block formula index writes."""
     reasons: set[str] = set()
@@ -3045,6 +3173,11 @@ class Indexer:
         candidate_quality_blocking_source_totals = _formula_candidate_quality_source_totals(
             candidate_quality_blocking_papers
         )
+        formula_review_summary = _formula_review_summary_rows(
+            candidate_quality_rows=candidate_quality_blocking_papers,
+            dense_formula_rows=dense_formula_papers,
+            scan_limited_rows=scan_limited_high_density_papers,
+        )
         summary = {
             "papers": processed,
             "selected": selected,
@@ -3087,6 +3220,7 @@ class Indexer:
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
+            "formula_review_summary_count": len(formula_review_summary),
             "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
             "semantic_formula_unmatched_reference_paper_count": sum(
                 1
@@ -3150,6 +3284,8 @@ class Indexer:
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
+            "formula_review_summary": formula_review_summary,
+            "formula_review_summary_count": len(formula_review_summary),
             "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
             "semantic_formula_unmatched_reference_paper_count": summary[
                 "semantic_formula_unmatched_reference_paper_count"
