@@ -7294,17 +7294,29 @@ def _extract_equation_number(raw_text: str) -> str:
     if tag_match is not None:
         tag = tag_match.group("tag")
         return _format_equation_number_token(tag) if tag else ""
+    tail_match = TRAILING_EQUATION_NUMBER_RE.search(raw_text)
+    if tail_match is not None and _should_accept_trailing_equation_number(raw_text, tail_match):
+        number = tail_match.group("number")
+        return _format_equation_number_token(number) if number else ""
     match = EQUATION_NUMBER_RE.search(raw_text)
     if match is None:
-        match = TRAILING_EQUATION_NUMBER_RE.search(raw_text)
-        if match is None or _looks_like_non_formula_text(raw_text):
-            return ""
-        number = match.group("number")
-        return _format_equation_number_token(number) if number else ""
+        return ""
     number = match.group("eq") or match.group("tail")
     if match.group("tail") and _looks_like_non_formula_text(raw_text):
         return ""
     return _format_equation_number_token(number) if number else ""
+
+
+def _should_accept_trailing_equation_number(raw_text: str, match: re.Match[str]) -> bool:
+    if not _looks_like_non_formula_text(raw_text):
+        return True
+    prefix = _normalize_space(raw_text[: match.start()])
+    if not prefix:
+        return False
+    if not (_has_formula_relation(prefix) or _has_formula_structure(prefix)):
+        return False
+    signal_count = _standalone_formula_block_signal_count(prefix) + _formula_relation_side_signal(prefix)
+    return signal_count >= 8
 
 
 def _normalize_space(text: str) -> str:

@@ -712,6 +712,14 @@ def test_extract_equation_number_accepts_spaced_tail_number():
     assert _extract_equation_number(
         r"\sigma_{SZA} = [C_0 + C_1 \mathrm{exp}(-C_3T)] (1-c_1\eta) \qquad ( A.5 )"
     ) == "(A.5)"
+    assert (
+        _extract_equation_number(
+            "By substituting Eqs. (2), (7a), and (7b) into Eq. (1), respectively, "
+            "we have ( sigma_0_PS - x(epsilon_p) )^6 * "
+            "(a1 + a2 A + a3 A^2 + a4 A^3) = sigma_0^6(epsilon_p) (8a)"
+        )
+        == "(8a)"
+    )
 
 
 def test_extract_pdf_block_equation_number_accepts_private_use_math_glyphs():
