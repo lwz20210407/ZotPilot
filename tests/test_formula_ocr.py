@@ -21,6 +21,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _dedupe_candidates,
     _drop_redundant_low_quality_fallback_number_candidates,
     _drop_redundant_weak_pdf_number_candidates,
+    _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents,
     _enrich_candidate_equation_numbers_from_pdf,
     _enrich_candidate_equation_numbers_from_pdf_text,
     _extract_block_signals,
@@ -7523,6 +7524,83 @@ def test_drop_redundant_weak_pdf_number_candidate_keeps_full_neighbor():
     )
 
     assert kept == [fuller_text_layer, unique_pdf_candidate]
+
+
+def test_drop_weak_fullwidth_regular_pdf_candidates_in_chapter_document():
+    chapter_formula_1 = FormulaCandidate(
+        page_num=93,
+        bbox=(100, 100, 300, 130),
+        raw_text="x = y + 1 (5-1)",
+        confidence=0.72,
+        equation_number="(5-1)",
+        source="pdf_text_equation_number",
+    )
+    chapter_formula_2 = FormulaCandidate(
+        page_num=94,
+        bbox=(100, 140, 300, 170),
+        raw_text="x = y + 2 (5-2)",
+        confidence=0.72,
+        equation_number="(5-2)",
+        source="pdf_text_equation_number",
+    )
+    chapter_formula_3 = FormulaCandidate(
+        page_num=95,
+        bbox=(100, 180, 300, 210),
+        raw_text="x = y + 3 (5-3)",
+        confidence=0.72,
+        equation_number="(5-3)",
+        source="pdf_text_equation_number",
+    )
+    weak_cjk_prose = FormulaCandidate(
+        page_num=49,
+        bbox=(180, 642, 468, 688),
+        raw_text="ｄ＜７为单位时间内真应力的变化量 （３",
+        confidence=0.72,
+        equation_number="(３)",
+        source="pdf_text_equation_number",
+    )
+    weak_fragment = FormulaCandidate(
+        page_num=120,
+        bbox=(196, 339, 230, 358),
+        raw_text="１（０５）",
+        confidence=0.72,
+        equation_number="(０５)",
+        source="pdf_text_equation_number",
+    )
+    strong_formula = FormulaCandidate(
+        page_num=35,
+        bbox=(80, 100, 420, 140),
+        raw_text="σ = E ε （４）",
+        confidence=0.72,
+        equation_number="(４)",
+        source="pdf_text_equation_number",
+    )
+
+    kept = _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents([
+        weak_cjk_prose,
+        chapter_formula_1,
+        chapter_formula_2,
+        chapter_formula_3,
+        weak_fragment,
+        strong_formula,
+    ])
+
+    assert kept == [chapter_formula_1, chapter_formula_2, chapter_formula_3, strong_formula]
+
+
+def test_drop_weak_fullwidth_regular_pdf_candidates_requires_chapter_context():
+    regular_formula = FormulaCandidate(
+        page_num=4,
+        bbox=(100, 100, 300, 130),
+        raw_text="１（０５）",
+        confidence=0.72,
+        equation_number="(０５)",
+        source="pdf_text_equation_number",
+    )
+
+    kept = _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents([regular_formula])
+
+    assert kept == [regular_formula]
 
 
 def test_auto_provider_drops_redundant_weak_pdf_number_candidate(tmp_path, monkeypatch):

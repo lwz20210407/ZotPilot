@@ -523,6 +523,7 @@ class MinerUCacheFormulaCandidateProvider:
         )
         candidates = _merge_number_only_pdf_candidates_with_latex_candidates(candidates)
         candidates = _dedupe_candidates(candidates)
+        candidates = _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents(candidates)
         candidates = _infer_missing_equation_numbers_between_numbered(candidates)
         candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
         candidates = _drop_redundant_low_quality_fallback_number_candidates(candidates)
@@ -704,6 +705,7 @@ class AutoFormulaCandidateProvider:
             return structured_candidates
         combined = _dedupe_candidates([*structured_candidates, *text_candidates])
         combined = _merge_number_only_pdf_candidates_with_latex_candidates(combined)
+        combined = _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents(combined)
         combined = _infer_missing_equation_numbers_between_numbered(combined)
         combined = _drop_redundant_weak_pdf_number_candidates(combined)
         combined = _drop_redundant_low_quality_fallback_number_candidates(combined)
@@ -6511,6 +6513,49 @@ def _drop_redundant_weak_pdf_number_candidates(candidates: list[FormulaCandidate
     if not drop_indices:
         return candidates
     return [candidate for index, candidate in enumerate(candidates) if index not in drop_indices]
+
+
+def _drop_weak_non_ascii_regular_pdf_candidates_in_chapter_documents(
+    candidates: list[FormulaCandidate],
+) -> list[FormulaCandidate]:
+    """Remove weak fullwidth regular-number PDF fragments in chapter-numbered docs."""
+    chapter_number_count = sum(
+        (sequence := _equation_number_sequence_value(candidate.equation_number)) is not None
+        and sequence[0] in {"hyphen", "decimal"}
+        for candidate in candidates
+    )
+    if chapter_number_count < 3:
+        return candidates
+    return [
+        candidate
+        for candidate in candidates
+        if not _is_weak_non_ascii_regular_pdf_candidate(candidate)
+    ]
+
+
+def _is_weak_non_ascii_regular_pdf_candidate(candidate: FormulaCandidate) -> bool:
+    if not candidate.source.startswith("pdf_text_equation_number"):
+        return False
+    if candidate.latex.strip() or not _is_non_ascii_regular_equation_number(candidate.equation_number):
+        return False
+    normalized = unicodedata.normalize("NFKC", _normalize_space(candidate.raw_text or ""))
+    if not normalized:
+        return True
+    if _looks_like_bibliographic_issue_number_record(normalized, candidate.equation_number):
+        return True
+    if _looks_like_equation_reference_prose_candidate(normalized, candidate.equation_number):
+        return True
+    if not (_has_formula_relation(normalized) or _has_pdf_encoded_relation_glyph(normalized)):
+        return True
+    math_signal_count = (
+        len(MATH_SYMBOL_RE.findall(normalized))
+        + len(PRIVATE_USE_MATH_GLYPH_RE.findall(normalized))
+        + _math_alnum_char_count(normalized)
+        + len(re.findall(r"[Α-Ωα-ω∑∏∫√∞∂∇∆]", normalized))
+    )
+    if CJK_CHAR_RE.search(normalized) and not _cjk_equation_reference_match_has_formula_payload(normalized):
+        return True
+    return math_signal_count < 4 and not _has_pdf_encoded_relation_glyph(normalized)
 
 
 def _drop_redundant_low_quality_fallback_number_candidates(
