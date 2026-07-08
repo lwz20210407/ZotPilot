@@ -781,6 +781,8 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         re.IGNORECASE,
     )
     if plain_parenthetical_reference and word_hits >= 6:
+        if _repeated_equation_number_block_has_formula_payload(normalized, number_pattern):
+            return False
         return True
     cjk_reference = re.search(
         rf"(?:如|见|由|利用|采用|根据|通过|按照|结合|参见)?(?:式|公式|方程).{{0,80}}"
@@ -803,6 +805,16 @@ def _equation_reference_intro_has_formula_payload(text: str, match: re.Match[str
     return _has_formula_relation(head) and (
         _has_formula_structure(head) or len(MATH_SYMBOL_RE.findall(head)) >= 2
     )
+
+
+def _repeated_equation_number_block_has_formula_payload(text: str, number_pattern: str) -> bool:
+    number_hits = len(re.findall(rf"[\(（]\s*{number_pattern}\s*[\)）]", text))
+    if number_hits < 2:
+        return False
+    symbol_hits = len(MATH_SYMBOL_RE.findall(text))
+    if symbol_hits < 8:
+        return False
+    return _has_formula_relation(text) and _has_formula_structure(text)
 
 
 class LocalFormulaOCRProvider:

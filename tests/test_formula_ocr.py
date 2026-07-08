@@ -98,6 +98,14 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "Eq. (76). MSE = 1/5 \\sum_i [\\varepsilon_f^{opt}(\\eta_i,L_i)-\\varepsilon_{f,i}]^2",
         "(76)",
     )
+    assert not _looks_like_equation_reference_prose_candidate(
+        (
+            "˙ ε (t) = −2 C 0 L s ε r (t) rates ranging from 350 s −1 to 2900 s −1 "
+            "by ε r (t) dt (2) means of split Hopkinson pressure bar "
+            "ε ( t ) = 2 C 0 ε r (t) dt (2)"
+        ),
+        "(2)",
+    )
     assert _looks_like_equation_reference_prose_candidate(
         "According to Eq. (76), the parameter set with the lowest MSE is selected for validation.",
         "(76)",
@@ -193,6 +201,35 @@ def test_pdf_records_for_assignment_keeps_eq_intro_formula_blocks():
         standalone=False,
         bbox=(45.1, 196.0, 507.6, 224.0),
         text="According to Eq. (76), the parameter set with the lowest MSE is selected for validation.",
+        page_width=595.0,
+        page_height=842.0,
+    )
+
+    assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]
+
+
+def test_pdf_records_for_assignment_keeps_repeated_number_formula_blocks():
+    formula_record = _PdfEquationNumberRecord(
+        number="(2)",
+        y_center=465.4,
+        x_right=556.5,
+        standalone=False,
+        bbox=(15.0, 430.4, 574.5, 492.0),
+        text=(
+            "˙ ε (t) = −2 C 0 L s ε r (t) rates ranging from 350 s −1 to 2900 s −1 "
+            "by ε r (t) dt (2) means of split Hopkinson pressure bar "
+            "ε ( t ) = 2 C 0 ε r (t) dt (2)"
+        ),
+        page_width=595.0,
+        page_height=842.0,
+    )
+    reference_record = _PdfEquationNumberRecord(
+        number="(2)",
+        y_center=510.0,
+        x_right=556.5,
+        standalone=False,
+        bbox=(15.0, 500.0, 574.5, 524.0),
+        text="The strain rate is calculated by the incident signal in (2) for each specimen.",
         page_width=595.0,
         page_height=842.0,
     )
