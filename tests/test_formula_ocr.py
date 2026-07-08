@@ -7003,6 +7003,110 @@ def test_rebased_mineru_json_payload_depth_guard_prevents_recursion_error():
     assert candidates == []
 
 
+def test_mineru_json_payload_assigns_adjacent_multi_number_cues_to_split_array_rows():
+    from zotpilot.feature_extraction import formula_ocr
+
+    payload = [
+        {
+            "type": "text",
+            "page_idx": 49,
+            "bbox": [100, 100, 520, 120],
+            "text": "试件的工程应力、应变由式（4-1）、（4-2）计算得出：",
+        },
+        {
+            "type": "equation",
+            "page_idx": 49,
+            "bbox": [160, 130, 480, 210],
+            "text": (
+                r"$$\begin{array} { c } "
+                r"{ \sigma _ { eng } = \frac { F } { A _ { 0 } } } \\ "
+                r"{ \varepsilon _ { eng } = \frac { \Delta L } { L _ { 0 } } } "
+                r"\end{array}$$"
+            ),
+        },
+        {
+            "type": "text",
+            "page_idx": 57,
+            "bbox": [100, 300, 520, 320],
+            "text": "然后分别由式（4-9）、（4-10）、（4-11）求出平均应力三轴度、平均罗德角参数、平均Lode参数。",
+        },
+        {
+            "type": "equation",
+            "page_idx": 57,
+            "bbox": [150, 330, 500, 450],
+            "text": (
+                r"$$\begin{array} { l } "
+                r"{ \overline { T } = \frac { 1 } { E_f } \int T d \varepsilon } \\ "
+                r"{ \overline { \xi } = \frac { 1 } { E_f } \int \xi d \varepsilon } \\ "
+                r"{ \overline { L } = \frac { 1 } { E_f } \int L d \varepsilon } "
+                r"\end{array}$$"
+            ),
+        },
+    ]
+
+    candidates = formula_ocr._parse_mineru_json_payload(payload, source="mineru_content_list")
+
+    assert [candidate.equation_number for candidate in candidates] == [
+        "(4-1)",
+        "(4-2)",
+        "(4-9)",
+        "(4-10)",
+        "(4-11)",
+    ]
+    assert all(candidate.equation_number_status in {"", "provided"} for candidate in candidates)
+    assert [candidate.page_num for candidate in candidates] == [50, 50, 58, 58, 58]
+    assert all(candidate.source == "mineru_content_list_row" for candidate in candidates)
+    assert candidates[0].latex.startswith(r"\sigma")
+    assert candidates[4].latex.startswith(r"\overline { L }")
+
+
+def test_pdf_mismatch_release_preserves_provided_cache_text_cue_numbers():
+    from zotpilot.feature_extraction import formula_ocr
+
+    records_by_page = {
+        50: [
+            _PdfEquationNumberRecord(
+                number="(4-2)",
+                y_center=560,
+                x_right=540,
+                standalone=False,
+                bbox=(520, 550, 540, 570),
+                text="(4-2)",
+                page_width=800,
+                page_height=1000,
+            )
+        ]
+    }
+    provided = FormulaCandidate(
+        page_num=50,
+        bbox=(449, 504, 540, 543),
+        raw_text=r"\sigma = F / A_0",
+        confidence=0.95,
+        latex=r"\sigma = \frac{F}{A_0}",
+        equation_number="(4-1)",
+        equation_number_status="provided",
+        source="mineru_content_list_row",
+    )
+    unconfirmed = FormulaCandidate(
+        page_num=50,
+        bbox=(449, 504, 540, 543),
+        raw_text=r"\sigma = F / A_0",
+        confidence=0.95,
+        latex=r"\sigma = \frac{F}{A_0}",
+        equation_number="(4-1)",
+        source="mineru_content_list",
+    )
+
+    released = formula_ocr._release_candidate_numbers_mismatched_to_pdf_page(
+        [provided, unconfirmed],
+        records_by_page,
+    )
+
+    assert released[0].equation_number == "(4-1)"
+    assert released[0].equation_number_status == "provided"
+    assert released[1].equation_number == ""
+
+
 def test_rebased_bounded_cache_scan_skips_symlink_escape(tmp_path):
     from zotpilot.feature_extraction.formula_ocr import _bounded_cache_scan
 

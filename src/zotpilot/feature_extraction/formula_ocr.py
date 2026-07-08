@@ -1771,6 +1771,7 @@ def _parse_mineru_json_payload(payload: Any, *, source: str) -> list[FormulaCand
         candidate = _candidate_from_formula_record(record, source=source)
         if candidate is not None:
             candidates.append(candidate)
+    candidates = _split_multirow_independent_formula_candidates(candidates)
     return _assign_adjacent_text_equation_number_cues(
         candidates,
         _iter_formula_number_cues(payload),
@@ -1784,10 +1785,10 @@ def _iter_formula_number_cues(payload: Any, *, inherited_page_num: int | None = 
             cues.extend(_iter_formula_number_cues(item, inherited_page_num=inherited_page_num))
     elif isinstance(payload, dict):
         page_num = _record_page_num_or_none(payload) or inherited_page_num
-        number = _record_formula_number_cue(payload)
         bbox = _record_bbox(payload)
-        if number and page_num is not None and _is_valid_bbox(bbox):
-            cues.append(_FormulaNumberCue(number=number, page_num=page_num, bbox=bbox))
+        if page_num is not None and _is_valid_bbox(bbox):
+            for number in _record_formula_number_cues(payload):
+                cues.append(_FormulaNumberCue(number=number, page_num=page_num, bbox=bbox))
         for value in payload.values():
             if isinstance(value, (dict, list)):
                 cues.extend(_iter_formula_number_cues(value, inherited_page_num=page_num))
@@ -1795,38 +1796,83 @@ def _iter_formula_number_cues(payload: Any, *, inherited_page_num: int | None = 
 
 
 def _record_formula_number_cue(record: dict[str, Any]) -> str:
+    numbers = _record_formula_number_cues(record)
+    return numbers[0] if numbers else ""
+
+
+def _record_formula_number_cues(record: dict[str, Any]) -> list[str]:
     type_text = str(record.get("type") or record.get("block_type") or "").lower()
     if type_text and "text" not in type_text and "paragraph" not in type_text:
-        return ""
+        return []
     text = str(record.get("text") or record.get("content") or "")
-    normalized = _normalize_space(text)
-    if not normalized or "$" in normalized or len(normalized) > 80:
-        return ""
-    matches = re.findall(r"[（(]\s*\d+(?:\.\d+)?\s*[)）]", normalized)
-    numbers = {_format_equation_number_token(match[1:-1].strip()) for match in matches}
-    numbers.discard("")
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text))
+    if not normalized or "$" in normalized:
+        return []
+    matches = [
+        _format_equation_number_token(match.group("number"))
+        for match in re.finditer(
+            rf"[（(]\s*(?P<number>{PDF_EQUATION_NUMBER_PATTERN})\s*[)）]",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    ]
+    numbers = []
+    seen: set[str] = set()
+    for number in matches:
+        if number and number not in seen:
+            numbers.append(number)
+            seen.add(number)
+    if not numbers:
+        return []
+    if len(numbers) > 1:
+        if len(normalized) > 360 or not re.search(
+            r"(?:式|公式|方程|formula|equation|eq\.?)",
+            normalized,
+            re.IGNORECASE,
+        ):
+            return []
+        return numbers if _equation_number_tokens_are_consecutive(numbers) else []
+    if len(normalized) > 80:
+        return []
+    number = numbers[0]
     if len(numbers) != 1:
-        return ""
-    number = next(iter(numbers))
+        return []
     integer_match = re.fullmatch(r"\((\d+)\)", number)
     if integer_match is not None and int(integer_match.group(1)) >= 100:
-        return ""
-    if re.fullmatch(r"[（(]\s*\d+(?:\.\d+)?\s*[)）]", normalized):
-        return number
+        return []
+    token_pattern = rf"[（(]\s*{PDF_EQUATION_NUMBER_PATTERN}\s*[)）]"
+    if re.fullmatch(token_pattern, normalized, flags=re.IGNORECASE):
+        return [number]
     label_pattern = (
         r"(?:式|公式|方程|编号|formula|equation|eq\.?)"
-        r"\s*[:：]?\s*[（(]\s*\d+(?:\.\d+)?\s*[)）]"
+        rf"\s*[:：]?\s*{token_pattern}"
     )
     if re.fullmatch(label_pattern, normalized, flags=re.IGNORECASE):
-        return number
+        return [number]
     if len(normalized) <= 40 and CJK_CHAR_RE.search(normalized):
         cjk_intro_pattern = (
             r".{0,20}(?:如|见|由|按|根据)?式"
-            r"\s*[（(]\s*\d+(?:\.\d+)?\s*[)）]\s*(?:所示|如下|为|可得)?"
+            rf"\s*{token_pattern}\s*(?:所示|如下|为|可得)?"
         )
         if re.fullmatch(cjk_intro_pattern, normalized):
-            return number
-    return ""
+            return [number]
+    return []
+
+
+def _equation_number_tokens_are_consecutive(numbers: list[str]) -> bool:
+    sequences = [_equation_number_sequence_value(number) for number in numbers]
+    if any(sequence is None for sequence in sequences):
+        return False
+    concrete_sequences = [sequence for sequence in sequences if sequence is not None]
+    if not concrete_sequences:
+        return False
+    first_kind_prefix = concrete_sequences[0][:2]
+    previous_value = concrete_sequences[0][2]
+    for sequence in concrete_sequences[1:]:
+        if sequence[:2] != first_kind_prefix or sequence[2] != previous_value + 1:
+            return False
+        previous_value = sequence[2]
+    return True
 
 
 def _assign_adjacent_text_equation_number_cues(
@@ -1848,6 +1894,7 @@ def _assign_adjacent_text_equation_number_cues(
         assigned[match_index] = replace(
             candidate,
             equation_number=cue.number,
+            equation_number_status="provided",
             source=source,
         )
         used_candidate_indices.add(match_index)
@@ -2686,6 +2733,9 @@ def _release_candidate_numbers_mismatched_to_pdf_page(
         if not candidate.equation_number or not _is_structured_cache_candidate(candidate):
             released.append(candidate)
             continue
+        if candidate.equation_number_status == "provided":
+            released.append(candidate)
+            continue
         page_records = records_by_page.get(candidate.page_num, [])
         if not page_records:
             released.append(candidate)
@@ -3464,7 +3514,7 @@ def _assign_equation_number_statuses_from_pdf(
         if (
             scan_ok
             and candidate.equation_number
-            and candidate.equation_number_status != "inferred"
+            and candidate.equation_number_status not in {"inferred", "provided"}
             and page_records
             and candidate.equation_number not in {record.number for record in page_records}
         ):
