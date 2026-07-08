@@ -18,6 +18,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _coerce_provider_result,
     _coerce_simpletex_response,
     _dedupe_candidates,
+    _drop_redundant_low_quality_fallback_number_candidates,
     _drop_redundant_weak_pdf_number_candidates,
     _enrich_candidate_equation_numbers_from_pdf,
     _enrich_candidate_equation_numbers_from_pdf_text,
@@ -2015,6 +2016,56 @@ def test_ocr_candidate_limit_preserves_dense_numbered_page_sequence():
         "(6)",
         "(7)",
     ]
+
+
+def test_drop_redundant_low_quality_fallback_keeps_structured_cached_formula():
+    structured = FormulaCandidate(
+        page_num=80,
+        bbox=(100, 100, 300, 140),
+        raw_text=r"$$ N = \frac{\rho_1 L_1 L_2}{\rho_2 d} $$",
+        confidence=0.95,
+        equation_number="(5-2)",
+        latex=r"N = \frac{\rho_1 L_1 L_2}{\rho_2 d}",
+        source="mineru_content_list",
+    )
+    fallback = FormulaCandidate(
+        page_num=84,
+        bbox=(90, 220, 280, 240),
+        raw_text="       D （ 5-2 ）",
+        confidence=0.55,
+        equation_number="(5-2)",
+        latex="",
+        source="text_layer",
+    )
+
+    candidates = _drop_redundant_low_quality_fallback_number_candidates([structured, fallback])
+
+    assert candidates == [structured]
+
+
+def test_drop_redundant_low_quality_fallback_does_not_cross_distant_restarts():
+    structured = FormulaCandidate(
+        page_num=5,
+        bbox=(100, 100, 300, 140),
+        raw_text=r"$$ a=b $$",
+        confidence=0.95,
+        equation_number="(2)",
+        latex="a=b",
+        source="mineru_content_list",
+    )
+    distant_fallback = FormulaCandidate(
+        page_num=80,
+        bbox=(100, 100, 300, 140),
+        raw_text="c=d (2)",
+        confidence=0.72,
+        equation_number="(2)",
+        latex="",
+        source="pdf_text_equation_number",
+    )
+
+    candidates = _drop_redundant_low_quality_fallback_number_candidates([structured, distant_fallback])
+
+    assert candidates == [structured, distant_fallback]
 
 
 def test_ocr_candidate_limit_preserves_dense_hyphen_chapter_number_sequence():

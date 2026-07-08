@@ -276,6 +276,7 @@ def _formula_equation_number_audit(equation_numbers: list[str]) -> dict[str, obj
         values.append((equation_number, prefix, value))
 
     prefixes = sorted({prefix for _number, prefix, _value in values})
+    prefix_counts = Counter(prefix or "regular" for _number, prefix, _value in values)
     warnings: set[str] = set()
     sequence_breaks: list[dict[str, object]] = []
     if len(prefixes) > 1 and not all(prefix.isdigit() for prefix in prefixes):
@@ -314,6 +315,22 @@ def _formula_equation_number_audit(equation_numbers: list[str]) -> dict[str, obj
                     "missing_count": value - previous_value - 1,
                 })
         previous_by_prefix[prefix] = (equation_number, value)
+
+    if len(prefixes) > 1:
+        sequence_breaks = [
+            break_row
+            for break_row in sequence_breaks
+            if not (
+                break_row.get("reason") == "missing_gap"
+                and prefix_counts.get(str(break_row.get("prefix") or ""), 0) <= 2
+            )
+        ]
+    if not any(break_row.get("reason") == "missing_gap" for break_row in sequence_breaks):
+        warnings.discard("missing_equation_number_gap")
+    if not any(break_row.get("reason") == "large_gap" for break_row in sequence_breaks):
+        warnings.discard("large_equation_number_gap")
+    if not any(break_row.get("reason") == "regression" for break_row in sequence_breaks):
+        warnings.discard("equation_number_regression")
 
     missing_equation_number_total = sum(
         int(break_row.get("missing_count", 0))

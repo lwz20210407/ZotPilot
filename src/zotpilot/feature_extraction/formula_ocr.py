@@ -450,6 +450,7 @@ class MinerUCacheFormulaCandidateProvider:
             candidates = _infer_single_leading_missing_equation_number(candidates)
             candidates = _infer_missing_equation_numbers_between_numbered(candidates)
             candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
+            candidates = _drop_redundant_low_quality_fallback_number_candidates(candidates)
             candidates = [
                 candidate if candidate.equation_number_status else replace(
                     candidate,
@@ -476,6 +477,7 @@ class MinerUCacheFormulaCandidateProvider:
         candidates = _infer_single_leading_missing_equation_number(candidates)
         candidates = _infer_missing_equation_numbers_between_numbered(candidates)
         candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
+        candidates = _drop_redundant_low_quality_fallback_number_candidates(candidates)
         if candidates and not self._append_missing_pdf_candidates:
             candidates = _assign_equation_number_statuses_from_pdf(
                 pdf_path,
@@ -523,6 +525,7 @@ class MinerUCacheFormulaCandidateProvider:
         candidates = _dedupe_candidates(candidates)
         candidates = _infer_missing_equation_numbers_between_numbered(candidates)
         candidates = _drop_redundant_weak_pdf_number_candidates(candidates)
+        candidates = _drop_redundant_low_quality_fallback_number_candidates(candidates)
         candidates = _merge_same_number_split_formula_candidates(candidates)
         candidates = _limit_ocr_needed_candidates(
             candidates,
@@ -703,6 +706,7 @@ class AutoFormulaCandidateProvider:
         combined = _merge_number_only_pdf_candidates_with_latex_candidates(combined)
         combined = _infer_missing_equation_numbers_between_numbered(combined)
         combined = _drop_redundant_weak_pdf_number_candidates(combined)
+        combined = _drop_redundant_low_quality_fallback_number_candidates(combined)
         combined = _merge_same_number_split_formula_candidates(combined)
         if max_candidates_per_doc > 0 and len(combined) > max_candidates_per_doc:
             combined = combined[:max_candidates_per_doc]
@@ -6373,6 +6377,48 @@ def _drop_redundant_weak_pdf_number_candidates(candidates: list[FormulaCandidate
     if not drop_indices:
         return candidates
     return [candidate for index, candidate in enumerate(candidates) if index not in drop_indices]
+
+
+def _drop_redundant_low_quality_fallback_number_candidates(
+    candidates: list[FormulaCandidate],
+) -> list[FormulaCandidate]:
+    """Prefer structured cached LaTeX over noisy OCR-needed fallbacks with the same number."""
+    if len(candidates) < 2:
+        return candidates
+    structured_by_number: dict[str, list[FormulaCandidate]] = {}
+    for candidate in candidates:
+        if (
+            candidate.equation_number
+            and candidate.latex.strip()
+            and _candidate_source_is_structured_cache(candidate)
+        ):
+            structured_by_number.setdefault(candidate.equation_number, []).append(candidate)
+    if not structured_by_number:
+        return candidates
+
+    kept: list[FormulaCandidate] = []
+    for candidate in candidates:
+        if (
+            candidate.equation_number
+            and not candidate.latex.strip()
+            and _candidate_source_is_unstructured_fallback(candidate)
+            and any(
+                abs(candidate.page_num - structured.page_num) <= 5
+                for structured in structured_by_number.get(candidate.equation_number, [])
+            )
+        ):
+            continue
+        kept.append(candidate)
+    return kept
+
+
+def _candidate_source_is_structured_cache(candidate: FormulaCandidate) -> bool:
+    return str(candidate.source or "").startswith(("mineru_", "pdf_extract_kit_"))
+
+
+def _candidate_source_is_unstructured_fallback(candidate: FormulaCandidate) -> bool:
+    source = str(candidate.source or "")
+    return source == "text_layer" or source.startswith("pdf_text_equation_number")
 
 
 def _same_nearby_equation_number(first: FormulaCandidate, second: FormulaCandidate) -> bool:
