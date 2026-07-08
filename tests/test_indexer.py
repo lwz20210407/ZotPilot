@@ -156,6 +156,53 @@ class TestFormulaBackfill:
             indexer = Indexer.for_formula_estimate(config)
             assert indexer.store.get_indexed_doc_ids() == {"DOC1", "DOC2", "DOC3"}
 
+    def test_formula_estimate_store_reads_semantic_evidence_from_sqlite(self, tmp_path):
+        import sqlite3
+
+        from zotpilot.indexer import _ReadOnlyIndexedDocStore
+
+        chroma_path = tmp_path / "chroma"
+        chroma_path.mkdir()
+        with sqlite3.connect(chroma_path / "chroma.sqlite3") as conn:
+            conn.execute("CREATE TABLE embeddings (id INTEGER PRIMARY KEY, embedding_id TEXT NOT NULL)")
+            conn.execute(
+                """
+                CREATE TABLE embedding_metadata (
+                    id INTEGER,
+                    key TEXT,
+                    string_value TEXT,
+                    int_value INTEGER,
+                    float_value REAL,
+                    bool_value INTEGER
+                )
+                """
+            )
+            conn.execute("INSERT INTO embeddings (id, embedding_id) VALUES (1, 'DOC1_chunk_0000')")
+            conn.executemany(
+                """
+                INSERT INTO embedding_metadata
+                    (id, key, string_value, int_value, float_value, bool_value)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (1, "doc_id", "DOC1", None, None, None),
+                    (1, "chunk_type", "text", None, None, None),
+                    (1, "chroma:document", r"The law is given in Eq. (2): \sigma=E\epsilon.", None, None, None),
+                    (1, "page_num", None, 4, None, None),
+                    (1, "chunk_index", None, 7, None, None),
+                    (1, "section", "methods", None, None, None),
+                ],
+            )
+
+        chunks = _ReadOnlyIndexedDocStore(chroma_path).get_formula_evidence_chunks("DOC1")
+
+        assert len(chunks) == 1
+        assert chunks[0].id == "DOC1_chunk_0000"
+        assert chunks[0].metadata["chunk_type"] == "text"
+        assert chunks[0].metadata["page_num"] == 4
+        assert chunks[0].metadata["chunk_index"] == 7
+        assert "Eq. (2)" in chunks[0].text
+
     def test_backfill_requires_existing_matching_config_hash(self, tmp_path):
         from zotpilot.indexer import ConfigDriftError, Indexer, _config_hash
 
@@ -3515,6 +3562,72 @@ class TestFormulaBackfill:
         assert result["results"][0]["candidate_preview"][1]["has_latex"] is False
         assert result["results"][0]["candidate_preview"][1]["needs_ocr"] is True
         assert result["results"][0]["candidate_preview"][1]["bbox"] == [1, 2, 3, 4]
+
+    def test_estimate_formula_backfill_adds_zotpilot_semantic_evidence(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import StoredChunk, ZoteroItem
+
+        class EvidenceStore:
+            def get_indexed_doc_ids(self) -> set[str]:
+                return {"DOC1"}
+
+            def get_formula_evidence_chunks(self, item_key: str):
+                assert item_key == "DOC1"
+                return [
+                    StoredChunk(
+                        id="DOC1_chunk_0005",
+                        text=r"The calibration follows Eq. (2), where \sigma = E\varepsilon.",
+                        metadata={
+                            "chunk_type": "text",
+                            "page_num": 4,
+                            "chunk_index": 5,
+                            "section": "methods",
+                        },
+                    )
+                ]
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path)
+        candidates = [
+            FormulaCandidate(
+                page_num=1,
+                bbox=(0, 0, 0, 0),
+                raw_text=r"E = mc^2",
+                confidence=0.95,
+                source="mineru_content_list",
+                latex=r"E = mc^2",
+                equation_number="(1)",
+            ),
+            FormulaCandidate(
+                page_num=3,
+                bbox=(0, 0, 0, 0),
+                raw_text=r"\eta = \sigma_m/\sigma_{eq}",
+                confidence=0.95,
+                source="mineru_content_list",
+                latex=r"\eta = \sigma_m/\sigma_{eq}",
+                equation_number="(3)",
+            ),
+        ]
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = EvidenceStore()
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.estimate_formula_backfill()
+
+        evidence = result["results"][0]["semantic_formula_evidence"]
+        assert result["estimated_provider_calls"] == 0
+        assert evidence["source"] == "zotpilot_chroma_chunks"
+        assert evidence["mode"] == "read_only_review_evidence"
+        assert evidence["unmatched_reference_numbers"] == ["(2)"]
+        assert result["semantic_formula_evidence_paper_count"] == 1
+        assert result["semantic_formula_unmatched_reference_paper_count"] == 1
+        assert result["summary"]["semantic_formula_unmatched_reference_paper_count"] == 1
 
     def test_estimate_formula_backfill_preview_can_include_all_candidates_without_truncation(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate

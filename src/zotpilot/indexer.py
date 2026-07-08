@@ -28,7 +28,7 @@ from .index_authority import (
 )
 from .index_progress import ProgressSink, emit_progress
 from .journal_ranker import JournalRanker
-from .models import ZoteroItem
+from .models import StoredChunk, ZoteroItem
 from .pdf import extract_document
 from .pdf.chunker import Chunker
 from .vector_store import IndexUnavailableError, VectorStore
@@ -61,14 +61,16 @@ class _ReadOnlyIndexedDocStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
 
+    def _sqlite_uri(self) -> str:
+        return f"file:{(self.db_path / 'chroma.sqlite3').as_posix()}?mode=ro&immutable=1"
+
     def get_indexed_doc_ids(self) -> set[str]:
         sqlite_path = self.db_path / "chroma.sqlite3"
         if not sqlite_path.exists():
             raise IndexUnavailableError(f"Chroma SQLite index not found at {sqlite_path}")
-        uri = f"file:{sqlite_path.as_posix()}?mode=ro&immutable=1"
         doc_ids: set[str] = set()
         try:
-            with sqlite3.connect(uri, uri=True) as conn:
+            with sqlite3.connect(self._sqlite_uri(), uri=True) as conn:
                 cursor = conn.execute("SELECT embedding_id FROM embeddings")
                 for (chunk_id,) in cursor:
                     doc_id = VectorStore._doc_id_from_chunk_id(str(chunk_id))
@@ -79,6 +81,88 @@ class _ReadOnlyIndexedDocStore:
                 f"Could not read indexed document ids from {sqlite_path}: {exc}"
             ) from exc
         return doc_ids
+
+    def get_formula_evidence_chunks(
+        self,
+        doc_id: str,
+        *,
+        chunk_types: tuple[str, ...] = ("text", "table", "figure"),
+        limit_per_type: int = 600,
+    ) -> list[StoredChunk]:
+        """Read ZotPilot-owned chunks that can provide formula review evidence."""
+        chunks: list[StoredChunk] = []
+        chunk_type_values = tuple(dict.fromkeys(chunk_types))
+        if not chunk_type_values:
+            return chunks
+        try:
+            with sqlite3.connect(self._sqlite_uri(), uri=True) as conn:
+                conn.row_factory = sqlite3.Row
+                for chunk_type in chunk_type_values:
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            e.embedding_id AS chunk_id,
+                            doc_text.string_value AS document,
+                            page_meta.int_value AS page_num,
+                            chunk_meta.int_value AS chunk_index,
+                            section_meta.string_value AS section,
+                            type_meta.string_value AS chunk_type
+                        FROM embeddings e
+                        JOIN embedding_metadata doc_meta
+                            ON doc_meta.id = e.id
+                            AND doc_meta.key = 'doc_id'
+                            AND doc_meta.string_value = ?
+                        JOIN embedding_metadata type_meta
+                            ON type_meta.id = e.id
+                            AND type_meta.key = 'chunk_type'
+                            AND type_meta.string_value = ?
+                        LEFT JOIN embedding_metadata doc_text
+                            ON doc_text.id = e.id
+                            AND doc_text.key = 'chroma:document'
+                        LEFT JOIN embedding_metadata page_meta
+                            ON page_meta.id = e.id
+                            AND page_meta.key = 'page_num'
+                        LEFT JOIN embedding_metadata chunk_meta
+                            ON chunk_meta.id = e.id
+                            AND chunk_meta.key = 'chunk_index'
+                        LEFT JOIN embedding_metadata section_meta
+                            ON section_meta.id = e.id
+                            AND section_meta.key = 'section'
+                        ORDER BY
+                            COALESCE(page_meta.int_value, 0),
+                            COALESCE(chunk_meta.int_value, -1),
+                            e.embedding_id
+                        LIMIT ?
+                        """,
+                        (doc_id, chunk_type, max(int(limit_per_type), 1)),
+                    )
+                    for row in rows:
+                        metadata = {
+                            "doc_id": doc_id,
+                            "chunk_type": row["chunk_type"] or chunk_type,
+                            "page_num": int(row["page_num"] or 0),
+                            "chunk_index": int(row["chunk_index"] if row["chunk_index"] is not None else -1),
+                            "section": row["section"] or "",
+                        }
+                        chunks.append(
+                            StoredChunk(
+                                id=str(row["chunk_id"] or ""),
+                                text=str(row["document"] or ""),
+                                metadata=metadata,
+                            )
+                        )
+        except sqlite3.Error as exc:
+            raise IndexUnavailableError(
+                f"Could not read formula evidence chunks from {self.db_path / 'chroma.sqlite3'}: {exc}"
+            ) from exc
+        return sorted(
+            chunks,
+            key=lambda row: (
+                int(row.metadata.get("page_num", 0) or 0),
+                int(row.metadata.get("chunk_index", -1) or -1),
+                row.id,
+            ),
+        )
 
 
 def _failure_signature(e: Exception) -> str:
@@ -234,6 +318,42 @@ def _formula_candidate_preview(
             "latex_preview": clip(latex),
         })
     return preview
+
+
+def _formula_semantic_evidence_for_item(
+    store: object,
+    *,
+    item_key: str,
+    candidates: list,
+) -> dict[str, object]:
+    """Return ZotPilot semantic-index evidence for candidate review, if available."""
+    if not hasattr(type(store), "get_formula_evidence_chunks"):
+        return {}
+    try:
+        chunks = store.get_formula_evidence_chunks(item_key)
+    except Exception as exc:
+        return {
+            "source": "zotpilot_chroma_chunks",
+            "mode": "read_only_review_evidence_unavailable",
+            "error": type(exc).__name__,
+            "error_message": str(exc),
+        }
+    if not chunks:
+        return {}
+    from .feature_extraction.formula_semantic_evidence import summarize_formula_semantic_evidence
+
+    candidate_numbers = [
+        number
+        for candidate in candidates
+        if (number := _formula_candidate_effective_equation_number(candidate))
+    ]
+    summary = summarize_formula_semantic_evidence(
+        chunks,
+        candidate_equation_numbers=candidate_numbers,
+    )
+    if summary.get("evidence_count") or summary.get("equation_reference_numbers"):
+        return summary
+    return {}
 
 
 def _formula_candidate_effective_equation_number(candidate: object) -> str:
@@ -2472,6 +2592,7 @@ class Indexer:
         truncated_candidate_papers: list[dict[str, object]] = []
         cached_latex_missing_number_papers: list[dict[str, object]] = []
         candidate_quality_blocking_papers: list[dict[str, object]] = []
+        semantic_formula_evidence_papers: list[dict[str, object]] = []
         batch_candidate_scan_limit = (
             high_density_candidate_threshold + 1
             if (
@@ -2588,6 +2709,28 @@ class Indexer:
                             item_key=item.item_key,
                             reason="cached_latex_missing_equation_numbers",
                         ),
+                    })
+            semantic_evidence = _formula_semantic_evidence_for_item(
+                self.store,
+                item_key=item.item_key,
+                candidates=candidates,
+            )
+            if semantic_evidence:
+                row["semantic_formula_evidence"] = semantic_evidence
+                if semantic_evidence.get("evidence_count"):
+                    semantic_formula_evidence_papers.append({
+                        "item_key": item.item_key,
+                        "title": item.title,
+                        "evidence_count": semantic_evidence.get("evidence_count", 0),
+                        "unmatched_reference_count": semantic_evidence.get(
+                            "unmatched_reference_count",
+                            0,
+                        ),
+                        "unmatched_reference_numbers": semantic_evidence.get(
+                            "unmatched_reference_numbers",
+                            [],
+                        ),
+                        "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
                     })
             if is_deferred_high_density:
                 row["default_batch_status"] = "deferred_high_density"
@@ -2814,6 +2957,12 @@ class Indexer:
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
+            "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
+            "semantic_formula_unmatched_reference_paper_count": sum(
+                1
+                for row in semantic_formula_evidence_papers
+                if int(row.get("unmatched_reference_count", 0) or 0) > 0
+            ),
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "request_complete": request_complete,
             "resume_after_found": resume_after_found,
@@ -2871,6 +3020,11 @@ class Indexer:
             "candidate_quality_blocking_reason_counts": candidate_quality_blocking_reason_counts,
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
+            "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
+            "semantic_formula_unmatched_reference_paper_count": summary[
+                "semantic_formula_unmatched_reference_paper_count"
+            ],
+            "semantic_formula_evidence_papers": semantic_formula_evidence_papers,
             "unmatched_requested_item_key_count": len(unmatched_requested_item_keys),
             "unmatched_requested_item_keys": unmatched_requested_item_keys,
             "request_complete": request_complete,
