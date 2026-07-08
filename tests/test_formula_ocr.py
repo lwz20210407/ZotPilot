@@ -84,6 +84,10 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
     text = "Eqs. (6.8), (6.9), and (6.12), whereas the effect of the prestrain is small."
 
     assert _looks_like_equation_reference_prose_candidate(text, "(6.9)")
+    assert _looks_like_equation_reference_prose_candidate(
+        "Due to the condition f_d[d-d_i]=0 in (29), for d in the current step.",
+        "(29)",
+    )
     assert not is_high_quality_formula_latex(
         r"\text{Figure 2. True stress-strain curves at different temperatures.}"
     )
@@ -4889,6 +4893,241 @@ def test_pdf_enrichment_position_correction_preserves_non_ascii_and_chapter_numb
     assert [candidate.equation_number for candidate in enriched] == ["(２)", "(2-20)"]
 
 
+def test_pdf_enrichment_assigns_number_freed_by_position_correction(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=7,
+            bbox=(84.0, 78.0, 361.0, 107.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"u \in \operatorname*{argmin} E(u)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(577.0, 77.0, 886.0, 138.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"f_d(\sigma,p,d)=s'(d)\psi_e^*(\sigma)-\rho'(d)\psi_p(p)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(544.0, 204.0, 709.0, 238.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\psi_e^*(\sigma)=\frac{1}{2}C^{-1}\sigma\cdot\sigma",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        7: [
+            _PdfEquationNumberRecord(
+                number="(23)",
+                y_center=69.6,
+                x_right=262.2,
+                standalone=True,
+                bbox=(244.5, 64.6, 262.2, 74.7),
+                text="(23)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(30)",
+                y_center=119.6,
+                x_right=500.3,
+                standalone=False,
+                bbox=(298.6, 105.0, 500.3, 134.3),
+                text="f d sigma p d (30)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(31)",
+                y_center=159.2,
+                x_right=500.3,
+                standalone=False,
+                bbox=(60.4, 124.1, 500.3, 194.4),
+                text="psi e star sigma (31)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["(23)", "(30)", "(31)"]
+
+
+def test_pdf_enrichment_position_correction_ignores_prose_reference_number(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=9,
+            bbox=(84.0, 639.0, 307.0, 662.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"K^{uu}\Delta u=-R^u",
+            equation_number="(40)",
+            source="mineru_content_list_row",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=9,
+            bbox=(519.0, 789.0, 912.0, 824.0),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"f_d(\sigma,\varepsilon^p,d)=s'(d)\frac{1}{2}E^{-1}\sigma^2"
+                r"-\rho'(d)\psi_p(\varepsilon^p)"
+            ),
+            equation_number="(29)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        9: [
+            _PdfEquationNumberRecord(
+                number="(40)",
+                y_center=487.6,
+                x_right=262.2,
+                standalone=False,
+                bbox=(48.4, 472.3, 262.2, 502.8),
+                text="Kuu Delta u = -Ru (40)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(29)",
+                y_center=619.4,
+                x_right=500.3,
+                standalone=False,
+                bbox=(46.8, 583.9, 500.3, 654.9),
+                text="Due to the condition f_d[d-d_i]=0 in (29), for damage evolution.",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(43)",
+                y_center=620.2,
+                x_right=500.3,
+                standalone=False,
+                bbox=(46.8, 611.6, 500.3, 628.7),
+                text="normalisation constants (43)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["(40)", "(43)"]
+
+
+def test_pdf_enrichment_reassigns_cross_page_number_freed_by_reference_correction(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=7,
+            bbox=(104.0, 743.0, 473.0, 807.0),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"f_d(\sigma,p,d)\leq 0,\quad d-d_{i-1}\geq 0,"
+                r"\quad f_d(\sigma,p,d)(d-d_{i-1})=0"
+            ),
+            source="mineru_content_list_row",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=9,
+            bbox=(84.0, 639.0, 307.0, 662.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"K^{uu}\Delta u=-R^u",
+            equation_number="(40)",
+            source="mineru_content_list_row",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=9,
+            bbox=(519.0, 789.0, 912.0, 824.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"f_d(\sigma,\varepsilon^p,d)=s'(d)E^{-1}\sigma^2-\rho'(d)\psi_p",
+            equation_number="(29)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        7: [
+            _PdfEquationNumberRecord(
+                number="(29)",
+                y_center=602.9,
+                x_right=262.2,
+                standalone=True,
+                bbox=(244.5, 597.9, 262.2, 607.9),
+                text="(29)",
+                page_width=547.1,
+                page_height=842.0,
+            )
+        ],
+        9: [
+            _PdfEquationNumberRecord(
+                number="(40)",
+                y_center=487.6,
+                x_right=262.2,
+                standalone=False,
+                bbox=(48.4, 472.3, 262.2, 502.8),
+                text="Kuu Delta u = -Ru (40)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(29)",
+                y_center=619.4,
+                x_right=500.3,
+                standalone=False,
+                bbox=(46.8, 583.9, 500.3, 654.9),
+                text="Due to the condition f_d[d-d_i]=0 in (29), for damage evolution.",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+            _PdfEquationNumberRecord(
+                number="(43)",
+                y_center=620.2,
+                x_right=500.3,
+                standalone=False,
+                bbox=(46.8, 611.6, 500.3, 628.7),
+                text="normalisation constants (43)",
+                page_width=547.1,
+                page_height=842.0,
+            ),
+        ],
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["(29)", "(40)", "(43)"]
+
+
 def test_pdf_enrichment_does_not_steal_far_record_before_sequence_gap(tmp_path):
     candidates = [
         FormulaCandidate(
@@ -5876,6 +6115,29 @@ def test_split_multirow_independent_formula_candidates_keeps_continuation_rows_t
     assert split[0].latex == candidates[0].latex
 
 
+def test_split_multirow_independent_formula_candidates_keeps_qquad_equals_continuation_rows_together():
+    candidates = [
+        FormulaCandidate(
+            page_num=7,
+            bbox=(135.0, 483.0, 424.0, 529.0),
+            raw_text="",
+            confidence=0.95,
+            source="mineru_content_list",
+            latex=(
+                r"\begin{array} { r l }"
+                r"& { \sigma_y(p,d) := \rho(d)\psi_p'(p)=\rho(d)\sigma_y(p) } \\"
+                r"& { \qquad = \rho(d)[\sigma_y(p_{i-1})+H\|\Delta\varepsilon^p\|] . }"
+                r"\end{array}"
+            ),
+        )
+    ]
+
+    split = _split_multirow_independent_formula_candidates(candidates)
+
+    assert len(split) == 1
+    assert split[0].latex == candidates[0].latex
+
+
 def test_split_multirow_independent_formula_candidates_splits_aligned_top_level_rows():
     candidates = [
         FormulaCandidate(
@@ -6231,6 +6493,42 @@ def test_merge_split_formula_candidates_merges_adjacent_parts_with_same_number()
     assert len(merged) == 2
     assert [candidate.equation_number for candidate in merged] == ["(3.17)", "(3.16)"]
     assert "C(T)" in merged[0].latex
+
+
+def test_merge_split_formula_candidates_merges_numbered_row_system_continuations():
+    candidates = [
+        FormulaCandidate(
+            page_num=7,
+            bbox=(104.0, 743.0, 473.0, 764.3),
+            raw_text="",
+            confidence=0.95,
+            latex=r"f_d(\sigma,p,d)\leq 0,\quad d-d_{i-1}\geq 0,",
+            equation_number="(29)",
+            source="mineru_content_list_row",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(104.0, 764.3, 473.0, 785.7),
+            raw_text="",
+            confidence=0.95,
+            latex=r"f_d(\sigma,p,d)\left[d-d_{i-1}\right]=0\quad \mathrm{in}\ \Omega,",
+            source="mineru_content_list_row",
+        ),
+        FormulaCandidate(
+            page_num=7,
+            bbox=(104.0, 785.7, 473.0, 807.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\nabla d\cdot\nu\geq 0,\quad \nabla d\cdot\nu\left[d-d_{i-1}\right]=0",
+            source="mineru_content_list_row",
+        ),
+    ]
+
+    merged = _merge_split_formula_candidates(candidates)
+
+    assert len(merged) == 1
+    assert merged[0].equation_number == "(29)"
+    assert r"\nabla d" in merged[0].latex
 
 
 def test_merge_number_only_pdf_candidates_transfers_number_to_nearby_latex_candidate():

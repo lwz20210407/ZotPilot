@@ -772,6 +772,14 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
     )
     if english_reference and word_hits >= 8:
         return True
+    plain_parenthetical_reference = re.search(
+        rf"\b(?:see|using|from|in|by|via|condition|conditions|case|step)\b"
+        rf"(?:\W+\w+){{0,6}}\W*[\(（]\s*{number_pattern}\s*[\)）]",
+        normalized,
+        re.IGNORECASE,
+    )
+    if plain_parenthetical_reference and word_hits >= 6:
+        return True
     cjk_reference = re.search(
         rf"(?:如|见|由|利用|采用|根据|通过|按照|结合|参见)?式\s*[\(（]\s*{number_pattern}\s*[\)）]",
         normalized,
@@ -2686,6 +2694,7 @@ def _correct_structured_candidate_numbers_from_pdf_positions(
 ) -> list[FormulaCandidate]:
     """Repair same-page cache equation numbers that landed on the wrong formula block."""
     corrected = list(candidates)
+    globally_freed_numbers: set[str] = set()
     for page_num, records in records_by_page.items():
         if len(records) < 2:
             continue
@@ -2711,6 +2720,7 @@ def _correct_structured_candidate_numbers_from_pdf_positions(
         for _index, candidate in page_items:
             if candidate.equation_number:
                 assigned_numbers[candidate.equation_number] = assigned_numbers.get(candidate.equation_number, 0) + 1
+        freed_numbers: set[str] = set()
         ordered_records = _pdf_equation_records_in_reading_order(records)
         ordered_page_items = [
             (page_items[local_index][0], candidate)
@@ -2755,18 +2765,183 @@ def _correct_structured_candidate_numbers_from_pdf_positions(
             )
             if current_is_competitive:
                 continue
+            previous_number = candidate.equation_number
             corrected[candidate_index] = replace(
                 candidate,
                 equation_number=best_record.number,
                 equation_number_status="",
             )
-            if candidate.equation_number:
-                assigned_numbers[candidate.equation_number] = max(
+            if previous_number:
+                assigned_numbers[previous_number] = max(
                     0,
-                    assigned_numbers.get(candidate.equation_number, 0) - 1,
+                    assigned_numbers.get(previous_number, 0) - 1,
                 )
+                if assigned_numbers[previous_number] == 0:
+                    freed_numbers.add(previous_number)
+                    globally_freed_numbers.add(previous_number)
             assigned_numbers[best_record.number] = assigned_numbers.get(best_record.number, 0) + 1
+            freed_numbers.discard(best_record.number)
+        if freed_numbers:
+            _assign_freed_pdf_numbers_to_unnumbered_structured_candidates(
+                corrected,
+                page_num=page_num,
+                records=ordered_records,
+                freed_numbers=freed_numbers,
+                assigned_numbers=assigned_numbers,
+                candidate_threshold=candidate_threshold,
+                record_threshold=record_threshold,
+            )
+    if globally_freed_numbers:
+        global_assigned_numbers: dict[str, int] = {}
+        for candidate in corrected:
+            if candidate.equation_number:
+                global_assigned_numbers[candidate.equation_number] = (
+                    global_assigned_numbers.get(candidate.equation_number, 0) + 1
+                )
+        _assign_freed_pdf_numbers_to_unnumbered_candidates_across_pages(
+            corrected,
+            records_by_page=records_by_page,
+            freed_numbers=globally_freed_numbers,
+            assigned_numbers=global_assigned_numbers,
+        )
     return corrected
+
+
+def _assign_freed_pdf_numbers_to_unnumbered_candidates_across_pages(
+    candidates: list[FormulaCandidate],
+    *,
+    records_by_page: dict[int, list[_PdfEquationNumberRecord]],
+    freed_numbers: set[str],
+    assigned_numbers: dict[str, int],
+) -> None:
+    if not freed_numbers:
+        return
+    for page_num, records in records_by_page.items():
+        available_records = [
+            record
+            for record in _pdf_equation_records_in_reading_order(records)
+            if record.number in freed_numbers
+            and assigned_numbers.get(record.number, 0) == 0
+            and _is_ascii_regular_equation_number(record.number)
+            and not _looks_like_equation_reference_prose_candidate(record.text, record.number)
+        ]
+        if not available_records:
+            continue
+        page_items = [
+            (index, candidate)
+            for index, candidate in enumerate(candidates)
+            if candidate.page_num == page_num
+            and not candidate.equation_number
+            and candidate.latex.strip()
+            and _is_structured_cache_candidate(candidate)
+            and _is_valid_bbox(candidate.bbox)
+            and (
+                _candidate_can_receive_inferred_equation_number(candidate)
+                or _candidate_can_receive_structured_gap_inferred_equation_number(candidate)
+            )
+        ]
+        if not page_items:
+            continue
+        ordered_page_items = [
+            (page_items[local_index][0], candidate)
+            for local_index, candidate in _candidate_items_in_reading_order(
+                [candidate for _index, candidate in page_items]
+            )
+        ]
+        number_rows = [
+            (record.number, record.y_center, record.x_right, record.standalone)
+            for record in available_records
+        ]
+        used_record_indices: set[int] = set()
+        for candidate_index, candidate in ordered_page_items:
+            match_index = _nearest_equation_number_index(
+                candidate,
+                number_rows,
+                used_record_indices,
+            )
+            if match_index is None:
+                continue
+            record = available_records[match_index]
+            if assigned_numbers.get(record.number, 0) > 0:
+                continue
+            candidates[candidate_index] = replace(
+                candidate,
+                equation_number=record.number,
+                equation_number_status="",
+            )
+            assigned_numbers[record.number] = 1
+            used_record_indices.add(match_index)
+
+
+def _assign_freed_pdf_numbers_to_unnumbered_structured_candidates(
+    candidates: list[FormulaCandidate],
+    *,
+    page_num: int,
+    records: list[_PdfEquationNumberRecord],
+    freed_numbers: set[str],
+    assigned_numbers: dict[str, int],
+    candidate_threshold: float,
+    record_threshold: float,
+) -> None:
+    page_items = [
+        (index, candidate)
+        for index, candidate in enumerate(candidates)
+        if candidate.page_num == page_num
+        and not candidate.equation_number
+        and candidate.latex.strip()
+        and _is_structured_cache_candidate(candidate)
+        and _is_valid_bbox(candidate.bbox)
+        and (
+            _candidate_can_receive_inferred_equation_number(candidate)
+            or _candidate_can_receive_structured_gap_inferred_equation_number(candidate)
+        )
+    ]
+    if not page_items:
+        return
+    candidate_order = _candidate_items_in_reading_order(
+        [candidate for _index, candidate in page_items]
+    )
+    ordered_page_items = [
+        (page_items[local_index][0], candidate)
+        for local_index, candidate in candidate_order
+    ]
+    available_records = [
+        record
+        for record in records
+        if record.number in freed_numbers
+        and assigned_numbers.get(record.number, 0) == 0
+        and _is_ascii_regular_equation_number(record.number)
+        and not _looks_like_equation_reference_prose_candidate(record.text, record.number)
+    ]
+    if not available_records:
+        return
+    for candidate_index, candidate in ordered_page_items:
+        best_record: _PdfEquationNumberRecord | None = None
+        best_score = float("inf")
+        best_y_distance = float("inf")
+        for record in available_records:
+            if assigned_numbers.get(record.number, 0) > 0:
+                continue
+            score, y_distance = _pdf_record_position_score_for_structured_candidate(
+                candidate,
+                record,
+                candidate_threshold=candidate_threshold,
+                record_threshold=record_threshold,
+            )
+            if y_distance > 55.0 or score > 74.0:
+                continue
+            if score < best_score:
+                best_record = record
+                best_score = score
+                best_y_distance = y_distance
+        if best_record is None or best_y_distance > 55.0:
+            continue
+        candidates[candidate_index] = replace(
+            candidate,
+            equation_number=best_record.number,
+            equation_number_status="",
+        )
+        assigned_numbers[best_record.number] = 1
 
 
 def _is_ascii_regular_equation_number(equation_number: str) -> bool:
@@ -2815,6 +2990,8 @@ def _nearest_pdf_record_for_structured_candidate_position(
 ) -> tuple[_PdfEquationNumberRecord, float, float] | None:
     best: tuple[_PdfEquationNumberRecord, float, float] | None = None
     for record in records:
+        if _looks_like_equation_reference_prose_candidate(record.text, record.number):
+            continue
         score, y_distance = _pdf_record_position_score_for_structured_candidate(
             candidate,
             record,
@@ -2842,6 +3019,8 @@ def _best_pdf_record_position_score_for_number(
     best_y_distance = float("inf")
     for record in records:
         if record.number != number:
+            continue
+        if _looks_like_equation_reference_prose_candidate(record.text, record.number):
             continue
         score, y_distance = _pdf_record_position_score_for_structured_candidate(
             candidate,
@@ -5897,6 +6076,7 @@ def _formula_row_likely_continuation(latex: str) -> bool:
     for _ in range(3):
         updated = re.sub(r"^(?:[{}]\s*)+", "", visible_text)
         updated = re.sub(r"^(?:\\(?:left|right)\s*\.\s*)+", "", updated)
+        updated = re.sub(r"^(?:\\(?:q?quad|hspace\s*\{[^{}]*\})\s*)+", "", updated)
         if updated == visible_text:
             break
         visible_text = updated
@@ -5966,12 +6146,12 @@ def _number_only_pdf_to_latex_candidate_score(
 def _should_merge_split_formula_candidates(first: FormulaCandidate, second: FormulaCandidate) -> bool:
     if first.page_num != second.page_num:
         return False
-    if _is_independent_formula_row_candidate(first) or _is_independent_formula_row_candidate(second):
-        return False
     if not first.latex.strip() or not second.latex.strip():
         return False
     if not (_is_valid_bbox(first.bbox) and _is_valid_bbox(second.bbox)):
         return False
+    if _is_independent_formula_row_candidate(first) or _is_independent_formula_row_candidate(second):
+        return _should_merge_numbered_row_system_candidates(first, second)
     vertical_gap = second.bbox[1] - first.bbox[3]
     if vertical_gap < -8.0:
         return False
@@ -6012,6 +6192,26 @@ def _should_merge_split_formula_candidates(first: FormulaCandidate, second: Form
 
 def _is_independent_formula_row_candidate(candidate: FormulaCandidate) -> bool:
     return candidate.source.endswith("_row")
+
+
+def _should_merge_numbered_row_system_candidates(first: FormulaCandidate, second: FormulaCandidate) -> bool:
+    if not (_is_independent_formula_row_candidate(first) and _is_independent_formula_row_candidate(second)):
+        return False
+    if first.page_num != second.page_num:
+        return False
+    if first.equation_number and second.equation_number:
+        return _should_merge_same_number_formula_candidates(first, second)
+    if not first.equation_number or second.equation_number:
+        return False
+    vertical_gap = second.bbox[1] - first.bbox[3]
+    if vertical_gap < -4.0 or vertical_gap > 8.0:
+        return False
+    first_width = max(0.0, first.bbox[2] - first.bbox[0])
+    second_width = max(0.0, second.bbox[2] - second.bbox[0])
+    overlap = max(0.0, min(first.bbox[2], second.bbox[2]) - max(first.bbox[0], second.bbox[0]))
+    if min(first_width, second_width) <= 0 or overlap / min(first_width, second_width) < 0.64:
+        return False
+    return _formula_row_has_relation(second.latex) or _formula_row_likely_continuation(second.latex)
 
 
 def _should_merge_same_number_formula_candidates(first: FormulaCandidate, second: FormulaCandidate) -> bool:
