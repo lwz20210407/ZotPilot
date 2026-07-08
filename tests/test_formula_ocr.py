@@ -2062,6 +2062,10 @@ def test_bibliographic_issue_number_record_rejects_merged_reference_line():
     )
 
     assert _looks_like_bibliographic_issue_number_record(text, "(7)")
+    assert _looks_like_bibliographic_issue_number_record(
+        "2009, 24((6):1345-1350.",
+        "(6)",
+    )
     assert not _looks_like_bibliographic_issue_number_record(r"\sigma = E\epsilon (7)", "(7)")
 
 

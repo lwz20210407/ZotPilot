@@ -5475,8 +5475,8 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     if not normalized or not normalized_number:
         return False
     pattern = (
-        rf"\b\d{{1,4}}\s*[\(（]\s*{re.escape(normalized_number)}\s*[\)）]"
-        r"\s*[,，]\s*\d+\s*[-–—]\s*\d+"
+        rf"\b\d{{1,4}}\s*[\(（]{{1,2}}\s*{re.escape(normalized_number)}\s*[\)）]"
+        r"\s*[,，:：]\s*\d+\s*[-–—]\s*\d+"
     )
     match = re.search(pattern, normalized)
     if match is None:
@@ -5484,6 +5484,12 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     prefix = normalized[: match.start()]
     suffix = normalized[match.end() :]
     abbrev_hits = len(re.findall(r"\b[A-Z][A-Za-z]{1,14}\.", prefix))
+    if re.search(r"(?:18|19|20)\d{2}", prefix) and not (
+        _has_formula_relation(prefix) or _has_formula_structure(prefix)
+    ):
+        return True
+    if CJK_CHAR_RE.search(prefix) and not (_has_formula_relation(prefix) or _has_formula_structure(prefix)):
+        return True
     if re.search(r"\((?:18|19|20)\d{2}\)", suffix):
         return True
     if re.search(r"(?:18|19|20)\d{2}", prefix) and abbrev_hits >= 2 and len(WORD_RE.findall(prefix)) >= 4:
