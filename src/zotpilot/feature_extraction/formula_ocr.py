@@ -771,7 +771,11 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         re.IGNORECASE,
     )
     if english_reference and word_hits >= 8:
-        if _equation_reference_intro_has_formula_payload(normalized, english_reference):
+        if _equation_reference_match_has_formula_payload(
+            normalized,
+            english_reference,
+            number_pattern,
+        ):
             return False
         return True
     plain_parenthetical_reference = re.search(
@@ -792,6 +796,36 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
     return bool(cjk_reference and cjk_hits >= 8)
 
 
+def _equation_reference_match_has_formula_payload(
+    text: str,
+    match: re.Match[str],
+    number_pattern: str,
+) -> bool:
+    if _equation_reference_intro_has_formula_payload(text, match):
+        return True
+    if _repeated_equation_number_block_has_formula_payload(text, number_pattern):
+        return True
+    before = text[max(0, match.start() - 120):match.start()]
+    after = text[match.end():match.end() + 240]
+    window = f"{before} {after}"
+    formula_intro = re.search(
+        r"(?:expressed|given|defined|written|computed|calculated|obtained|described)\s+as\s*$",
+        before,
+        re.IGNORECASE,
+    )
+    colon_intro = re.match(r"^\s*[:：]", after)
+    min_symbols = 2 if formula_intro or colon_intro else 6
+    symbol_hits = len(MATH_SYMBOL_RE.findall(window))
+    has_pdf_relation_glyph = _has_pdf_encoded_relation_glyph(window)
+    if symbol_hits < min_symbols and not has_pdf_relation_glyph:
+        return False
+    has_relation = _has_formula_relation(window) or has_pdf_relation_glyph
+    has_structure = _has_formula_structure(window) or has_pdf_relation_glyph
+    if not (has_relation and has_structure):
+        return False
+    return bool(formula_intro or colon_intro)
+
+
 def _equation_reference_intro_has_formula_payload(text: str, match: re.Match[str]) -> bool:
     """Keep display equations whose PDF text starts with "Eq. (n)."."""
     if match.start() > 8:
@@ -808,13 +842,20 @@ def _equation_reference_intro_has_formula_payload(text: str, match: re.Match[str
 
 
 def _repeated_equation_number_block_has_formula_payload(text: str, number_pattern: str) -> bool:
-    number_hits = len(re.findall(rf"[\(（]\s*{number_pattern}\s*[\)）]", text))
+    number_hits = len(re.findall(rf"[\(（ð]\s*{number_pattern}\s*[\)）Þ]", text))
     if number_hits < 2:
         return False
     symbol_hits = len(MATH_SYMBOL_RE.findall(text))
-    if symbol_hits < 8:
+    has_pdf_relation_glyph = _has_pdf_encoded_relation_glyph(text)
+    if symbol_hits < 8 and not has_pdf_relation_glyph:
         return False
-    return _has_formula_relation(text) and _has_formula_structure(text)
+    return (_has_formula_relation(text) or has_pdf_relation_glyph) and (
+        _has_formula_structure(text) or has_pdf_relation_glyph
+    )
+
+
+def _has_pdf_encoded_relation_glyph(text: str) -> bool:
+    return "¼" in text or "1⁄4" in text
 
 
 class LocalFormulaOCRProvider:
