@@ -507,16 +507,42 @@ def _duplicate_equation_number_groups(candidates: list) -> tuple[list[str], list
         page_num = getattr(candidate, "page_num", 0)
         occurrences_by_number[number].append(page_num if isinstance(page_num, int) else 0)
 
+    strict_repeated_sections = {
+        number
+        for number, pages in occurrences_by_number.items()
+        if len(pages) > 1 and _duplicate_equation_number_likely_section_restart(pages)
+    }
+    strict_regular_restart_count = sum(
+        1
+        for number in strict_repeated_sections
+        if _equation_number_is_regular_restart_context(number)
+    )
+
     review_duplicates: list[str] = []
     repeated_sections: list[str] = []
     for number, pages in occurrences_by_number.items():
         if len(pages) <= 1:
             continue
-        if _duplicate_equation_number_likely_section_restart(pages):
+        if (
+            number in strict_repeated_sections
+            or _duplicate_equation_number_likely_broad_section_restart(
+                number,
+                pages,
+                strict_regular_restart_count=strict_regular_restart_count,
+            )
+        ):
             repeated_sections.append(number)
         else:
             review_duplicates.append(number)
     return review_duplicates, repeated_sections
+
+
+def _equation_number_is_regular_restart_context(equation_number: str) -> bool:
+    parsed = _equation_number_audit_value(equation_number)
+    if parsed is None:
+        return False
+    prefix, value = parsed
+    return not prefix and 1 <= value <= 20
 
 
 def _duplicate_equation_number_likely_section_restart(pages: list[int]) -> bool:
@@ -530,6 +556,29 @@ def _duplicate_equation_number_likely_section_restart(pages: list[int]) -> bool:
         for previous, current in zip(valid_pages, valid_pages[1:])
     ]
     return bool(adjacent_gaps) and min(adjacent_gaps) >= 8
+
+
+def _duplicate_equation_number_likely_broad_section_restart(
+    equation_number: str,
+    pages: list[int],
+    *,
+    strict_regular_restart_count: int,
+) -> bool:
+    """Allow a loose duplicate when the whole document clearly restarts numbering."""
+    if strict_regular_restart_count < 3:
+        return False
+    if not _equation_number_is_regular_restart_context(equation_number):
+        return False
+    valid_pages = sorted(page for page in pages if page > 0)
+    if len(valid_pages) != len(pages) or len(set(valid_pages)) != len(valid_pages):
+        return False
+    if len(valid_pages) < 3 or valid_pages[-1] - valid_pages[0] < 50:
+        return False
+    cluster_count = 1
+    for previous, current in zip(valid_pages, valid_pages[1:]):
+        if current - previous >= 8:
+            cluster_count += 1
+    return cluster_count >= 3
 
 
 def _equation_number_prefix_sort_key(prefix: str) -> tuple[tuple[int, object], ...]:

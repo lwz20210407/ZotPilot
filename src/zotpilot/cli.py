@@ -1306,26 +1306,29 @@ def cmd_estimate_formula_backfill(args):
         if getattr(args, "preview_all_candidates", False)
         else getattr(args, "preview_candidates", 0) or 0
     )
+    estimate_kwargs = {
+        "item_key": args.item_key,
+        "item_keys": args.item_keys,
+        "limit": args.limit,
+        "resume_after": getattr(args, "resume_after", None),
+        "daily_call_budget": getattr(args, "daily_call_budget", None),
+        "candidate_preview_limit": preview_limit,
+        "candidate_preview_chars": getattr(args, "preview_chars", 160),
+        "pdf_fallback_max_pages": getattr(args, "pdf_fallback_max_pages", None),
+        "page_min": getattr(args, "page_min", None),
+        "page_max": getattr(args, "page_max", None),
+        "sample_size": getattr(args, "sample_size", None),
+        "sample_seed": getattr(args, "sample_seed", 0),
+        "exclude_item_keys": _merge_item_key_sources(
+            getattr(args, "exclude_item_keys", None),
+            getattr(args, "exclude_item_keys_file", None),
+        ),
+    }
+    if hasattr(args, "include_high_density"):
+        estimate_kwargs["include_high_density"] = getattr(args, "include_high_density", False)
     try:
         result = _call_with_json_stdout_guard(
-            lambda: Indexer.for_formula_estimate(config).estimate_formula_backfill(
-                item_key=args.item_key,
-                item_keys=args.item_keys,
-                limit=args.limit,
-                resume_after=getattr(args, "resume_after", None),
-                daily_call_budget=getattr(args, "daily_call_budget", None),
-                candidate_preview_limit=preview_limit,
-                candidate_preview_chars=getattr(args, "preview_chars", 160),
-                pdf_fallback_max_pages=getattr(args, "pdf_fallback_max_pages", None),
-                page_min=getattr(args, "page_min", None),
-                page_max=getattr(args, "page_max", None),
-                sample_size=getattr(args, "sample_size", None),
-                sample_seed=getattr(args, "sample_seed", 0),
-                exclude_item_keys=_merge_item_key_sources(
-                    getattr(args, "exclude_item_keys", None),
-                    getattr(args, "exclude_item_keys_file", None),
-                ),
-            ),
+            lambda: Indexer.for_formula_estimate(config).estimate_formula_backfill(**estimate_kwargs),
             json_output=args.json,
         )
     except (ConfigDriftError, IndexUnavailableError, ValueError) as e:
@@ -2618,6 +2621,11 @@ def main(argv: list[str] | None = None) -> int:
             "After PDF number enrichment, add missing numbered PDF formula candidates for reviewed gaps; "
             "also enables --cache-pdf-number-enrichment and may increase estimated OCR provider calls"
         ),
+    )
+    sub_formula_estimate.add_argument(
+        "--include-high-density",
+        action="store_true",
+        help="Use full candidate scanning for high-density formula documents after reviewing the estimate",
     )
     sub_formula_estimate.add_argument(
         "--page-min",
