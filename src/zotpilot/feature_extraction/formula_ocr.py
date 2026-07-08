@@ -5827,6 +5827,23 @@ def _looks_like_crystallographic_plane_relation_text(text: str) -> bool:
     )
 
 
+def _looks_like_crystallographic_plane_sequence_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized or len(normalized) > 80:
+        return False
+    if _has_formula_relation(normalized) or MATH_LATEX_COMMAND_RE.search(normalized):
+        return False
+    if re.search(r"[=¼þ<>≤≥≈≠∑∏∫√∞∂∇∆]|(?:^|\s)[+*/](?:\s|$)", normalized):
+        return False
+    plane_hits = re.findall(r"[\(（\[]\s*\d{2,4}\s*[\)）\]]", normalized)
+    if len(plane_hits) < 2:
+        return False
+    residue = re.sub(r"[\(（\[]\s*\d{2,4}\s*[\)）\]]", " ", normalized)
+    residue = re.sub(r"\b(?:α|β|γ|hcp|fcc|bcc|hcp|bcc|fcc|martensite|austenite)\b", " ", residue, flags=re.IGNORECASE)
+    residue = re.sub(r"[A-Za-zΑ-Ωα-ω\s,.;:：，。/\\-–—＋+·•]+", " ", residue)
+    return not _normalize_space(residue)
+
+
 def _looks_like_crystallographic_orientation_context(prefix: str, suffix: str) -> bool:
     combined = unicodedata.normalize("NFKC", _normalize_space(f"{prefix} {suffix}"))
     if not _looks_like_crystallographic_plane_relation_text(combined):
@@ -6210,6 +6227,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
     if AUTHOR_AFFILIATION_RE.search(normalized):
         return True
     if _looks_like_crystallographic_plane_relation_text(normalized):
+        return True
+    if _looks_like_crystallographic_plane_sequence_text(normalized):
         return True
     if _looks_like_unlabeled_numeric_matrix_fragment(normalized):
         return True

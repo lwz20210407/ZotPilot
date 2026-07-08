@@ -42,6 +42,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _looks_like_figure_or_table_reference_record,
     _looks_like_high_density_unnumbered_text_layer_noise,
     _looks_like_isolated_pdf_equation_number_fragment_record,
+    _looks_like_non_formula_text,
     _looks_like_numeric_table_parenthetical_record,
     _looks_like_table_or_step_plain_number_record,
     _merge_inline_equation_record_with_formula_blocks,
@@ -2156,6 +2157,11 @@ def test_figure_reference_record_rejects_parenthetical_number():
     assert _looks_like_figure_or_table_reference_record("in Fig. (26).", "(26)")
     assert _looks_like_figure_or_table_reference_record("Table 4", "(4)")
     assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (26)", "(26)")
+
+
+def test_non_formula_text_rejects_crystallographic_plane_sequence():
+    assert _looks_like_non_formula_text("β (110) β (200) β (211)")
+    assert not _looks_like_non_formula_text(r"\beta = \sigma_{110} + \sigma_{200} (211)")
 
 
 def test_equation_reference_prose_rejects_defined_in_eq_reference():
