@@ -790,6 +790,16 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         ):
             return False
         return True
+    embedded_english_reference = re.search(
+        rf"\b(?:using|substituting|substitute|substituted|inserting|noting|remark)\b"
+        rf"[^。;；\n]{{0,220}}"
+        rf"(?:eqs?\.?|equations?)\s*"
+        rf"[\(（]\s*{number_pattern}\s*[\)）]",
+        normalized,
+        re.IGNORECASE,
+    )
+    if embedded_english_reference and word_hits >= 3:
+        return True
     defined_in_reference = re.search(
         rf"\b(?:defined|reported|shown|listed|given|described)\s+in\s+"
         rf"(?:eqs?\.?|equations?)\s*[\(（]\s*{number_pattern}\s*[\)）]",
@@ -1257,6 +1267,9 @@ def _extract_text_layer_formula_candidates(
                 confidence = _candidate_confidence(raw_text, bbox, font_names, span_flags)
                 if confidence <= 0.0 or confidence < min_confidence:
                     continue
+                equation_number = _extract_equation_number(raw_text)
+                if equation_number and _looks_like_equation_reference_prose_candidate(raw_text, equation_number):
+                    continue
                 page_candidates.append(
                     FormulaCandidate(
                         page_num=page_num,
@@ -1267,7 +1280,7 @@ def _extract_text_layer_formula_candidates(
                         span_flags=tuple(sorted(span_flags)),
                         reference_context=_extract_reference_context(page_text, raw_text),
                         variable_gloss=_extract_variable_gloss(page_text, raw_text),
-                        equation_number=_extract_equation_number(raw_text),
+                        equation_number=equation_number,
                         source="text_layer",
                     )
                 )

@@ -152,6 +152,14 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "According to Eq. (76), the parameter set with the lowest MSE is selected for validation.",
         "(76)",
     )
+    assert _looks_like_equation_reference_prose_candidate(
+        "Remark 3. Using η = 0 in Eq. (4.12), and noting that ω <0> = 0,",
+        "(4.12)",
+    )
+    assert _looks_like_equation_reference_prose_candidate(
+        "Substituting Eqs. (5.38)-(5.40) in Eq. (5.37), and using η = η1 i + η2 j + η3 k,",
+        "(5.37)",
+    )
     assert not is_high_quality_formula_latex(
         r"\text{Figure 2. True stress-strain curves at different temperatures.}"
     )
