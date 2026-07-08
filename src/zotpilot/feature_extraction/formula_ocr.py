@@ -4251,6 +4251,8 @@ def _scan_pdf_equation_number_records_by_page(
                 continue
             if _looks_like_figure_or_table_reference_record(record.text, record.number):
                 continue
+            if _looks_like_enumerated_list_item_record(record.text, record.number):
+                continue
             if _looks_like_table_or_step_plain_number_record(record.text, record.number):
                 continue
             if _looks_like_numeric_table_parenthetical_record(record.text, record.number):
@@ -5569,6 +5571,27 @@ def _looks_like_figure_or_table_reference_record(text: str, equation_number: str
         rf"\s*[\(（]?\s*{number_pattern}\s*[\)）]?"
     )
     return bool(re.search(reference_pattern, normalized, re.IGNORECASE))
+
+
+def _looks_like_enumerated_list_item_record(text: str, equation_number: str) -> bool:
+    """Reject prose item lists such as ``(3) spacers, (4) o-ring``."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number:
+        return False
+    if _has_formula_payload_signal(normalized):
+        return False
+    number_pattern = re.escape(normalized_number)
+    if not re.search(rf"[\(（]\s*{number_pattern}\s*[\)）]", normalized):
+        return False
+    list_item_hits = re.findall(
+        r"[\(（]\s*\d{1,2}\s*[\)）]\s*[A-Za-z][A-Za-z0-9-]{2,}",
+        normalized,
+    )
+    if len(list_item_hits) >= 2:
+        return True
+    cjk_item_hits = re.findall(r"[\(（]\s*\d{1,2}\s*[\)）]\s*[\u4e00-\u9fff]{2,}", normalized)
+    return len(cjk_item_hits) >= 2
 
 
 def _looks_like_table_or_step_plain_number_record(text: str, equation_number: str) -> bool:

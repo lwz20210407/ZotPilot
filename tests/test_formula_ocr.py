@@ -38,6 +38,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _limit_ocr_needed_candidates,
     _looks_like_bare_pdf_equation_number_fragment_record,
     _looks_like_bibliographic_issue_number_record,
+    _looks_like_enumerated_list_item_record,
     _looks_like_equation_reference_prose_candidate,
     _looks_like_figure_or_table_reference_record,
     _looks_like_high_density_unnumbered_text_layer_noise,
@@ -2157,6 +2158,13 @@ def test_figure_reference_record_rejects_parenthetical_number():
     assert _looks_like_figure_or_table_reference_record("in Fig. (26).", "(26)")
     assert _looks_like_figure_or_table_reference_record("Table 4", "(4)")
     assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (26)", "(26)")
+
+
+def test_enumerated_list_item_record_rejects_parenthetical_numbers():
+    text = "lithium, (3) spacers, (4) o-ring and (5) binder clip; the laser source is above the"
+
+    assert _looks_like_enumerated_list_item_record(text, "(3)")
+    assert not _looks_like_enumerated_list_item_record(r"F = ma + b (3)", "(3)")
 
 
 def test_non_formula_text_rejects_crystallographic_plane_sequence():
