@@ -781,7 +781,8 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
     if plain_parenthetical_reference and word_hits >= 6:
         return True
     cjk_reference = re.search(
-        rf"(?:如|见|由|利用|采用|根据|通过|按照|结合|参见)?式\s*[\(（]\s*{number_pattern}\s*[\)）]",
+        rf"(?:如|见|由|利用|采用|根据|通过|按照|结合|参见)?(?:式|公式|方程).{{0,80}}"
+        rf"[\(（]\s*{number_pattern}\s*[\)）]",
         normalized,
     )
     return bool(cjk_reference and cjk_hits >= 8)
@@ -1824,6 +1825,8 @@ def _record_formula_number_cues(record: dict[str, Any]) -> list[str]:
             seen.add(number)
     if not numbers:
         return []
+    if _formula_number_cue_text_looks_like_reference_prose(normalized):
+        return []
     if len(numbers) > 1:
         if len(normalized) > 360 or not re.search(
             r"(?:式|公式|方程|formula|equation|eq\.?)",
@@ -1857,6 +1860,15 @@ def _record_formula_number_cues(record: dict[str, Any]) -> list[str]:
         if re.fullmatch(cjk_intro_pattern, normalized):
             return [number]
     return []
+
+
+def _formula_number_cue_text_looks_like_reference_prose(text: str) -> bool:
+    if not CJK_CHAR_RE.search(text):
+        return False
+    reference_intro = r"(?:^|[\s，,。；;：:、])(?:由|根据|利用|通过|代入|结合|按|参照|见)"
+    if not re.search(rf"{reference_intro}(?:上)?(?:式|公式|方程)", text):
+        return False
+    return bool(re.search(r"(?:计算|求得|得到|可得|推导|确定|代入|表示|建立|构建)", text))
 
 
 def _equation_number_tokens_are_consecutive(numbers: list[str]) -> bool:
@@ -2715,12 +2727,48 @@ def _enrich_candidate_equation_numbers_from_pdf(
             index for index, (number, _y_center, _x1, _standalone) in enumerate(ordered_numbers)
             if number in assigned_numbers
         }
-        for candidate_index, candidate in ordered_candidates:
-            match_index = _nearest_equation_number_index(candidate, ordered_numbers, used_numbers)
-            if match_index is None:
-                continue
-            used_numbers.add(match_index)
-            enriched[candidate_index] = replace(candidate, equation_number=ordered_numbers[match_index][0])
+        assigned_candidate_indices: set[int] = set()
+        for standalone in (False, True):
+            candidate_cursor = 0
+            record_indices = [
+                index
+                for index, (_number, _y_center, _x1, is_standalone) in enumerate(ordered_numbers)
+                if index not in used_numbers and is_standalone == standalone
+            ]
+            for record_index in record_indices:
+                best_match: tuple[float, float, int, int] | None = None
+                for local_position in range(candidate_cursor, len(ordered_candidates)):
+                    candidate_index, candidate = ordered_candidates[local_position]
+                    if candidate_index in assigned_candidate_indices:
+                        continue
+                    matches = _equation_number_position_match_rows(
+                        candidate,
+                        [ordered_numbers[record_index]],
+                        set(),
+                        standalone=standalone,
+                    )
+                    if not matches:
+                        continue
+                    score, y_distance, _local_match_index = matches[0]
+                    skipped = sum(
+                        1
+                        for skipped_position in range(candidate_cursor, local_position)
+                        if ordered_candidates[skipped_position][0] not in assigned_candidate_indices
+                    )
+                    adjusted_score = score + skipped * 24.0
+                    candidate_match = (adjusted_score, y_distance, candidate_index, local_position)
+                    if best_match is None or candidate_match < best_match:
+                        best_match = candidate_match
+                if best_match is None:
+                    continue
+                _adjusted_score, _y_distance, candidate_index, local_position = best_match
+                used_numbers.add(record_index)
+                assigned_candidate_indices.add(candidate_index)
+                candidate_cursor = local_position + 1
+                enriched[candidate_index] = replace(
+                    enriched[candidate_index],
+                    equation_number=ordered_numbers[record_index][0],
+                )
     return _correct_structured_candidate_numbers_from_pdf_positions(enriched, records_by_page)
 
 
@@ -2981,9 +3029,14 @@ def _is_ascii_equation_number_sequence(equation_number: str) -> bool:
 def _pdf_records_for_candidate_number_assignment(
     records: list[_PdfEquationNumberRecord],
 ) -> list[_PdfEquationNumberRecord]:
-    if not _page_has_chapter_equation_records(records):
-        return records
-    return [record for record in records if _is_ascii_equation_number_sequence(record.number)]
+    usable_records = [
+        record
+        for record in records
+        if not _looks_like_equation_reference_prose_candidate(record.text, record.number)
+    ]
+    if not _page_has_chapter_equation_records(usable_records):
+        return usable_records
+    return [record for record in usable_records if _is_ascii_equation_number_sequence(record.number)]
 
 
 def _assign_freed_pdf_numbers_to_unnumbered_candidates_across_pages(
@@ -5764,6 +5817,29 @@ def _nearest_equation_number_index_for_kind(
     return best_index if best_y_distance <= 75.0 and best_score <= 90.0 else None
 
 
+def _equation_number_position_match_rows(
+    candidate: FormulaCandidate,
+    number_rows: list[tuple[str, float, float, bool]],
+    used_indices: set[int],
+    *,
+    standalone: bool,
+) -> list[tuple[float, float, int]]:
+    y_center = (candidate.bbox[1] + candidate.bbox[3]) / 2.0
+    x_center = (candidate.bbox[0] + candidate.bbox[2]) / 2.0
+    y_candidates = _candidate_coordinate_values_to_pdf_space(candidate, y_center)
+    x_candidates = _candidate_coordinate_values_to_pdf_space(candidate, x_center)
+    matches: list[tuple[float, float, int]] = []
+    for index, (_number, number_y, number_x, is_standalone) in enumerate(number_rows):
+        if index in used_indices or is_standalone != standalone:
+            continue
+        y_distance = min(abs(candidate_y - number_y) for candidate_y in y_candidates)
+        x_distance = min(abs(candidate_x - number_x) for candidate_x in x_candidates)
+        score = y_distance + min(x_distance, 260.0) * 0.06
+        if y_distance <= 75.0 and score <= 90.0:
+            matches.append((score, y_distance, index))
+    return matches
+
+
 def _candidate_y_to_pdf_space(candidate: FormulaCandidate, y_value: float) -> float:
     if candidate.bbox_coordinate_space == "pdf":
         return y_value
@@ -5778,6 +5854,8 @@ def _candidate_coordinate_values_to_pdf_space(candidate: FormulaCandidate, value
         return [value]
     scaled = value * 0.761
     if candidate.bbox_coordinate_space in {"unknown", "image"}:
+        if candidate.source.startswith("mineru_"):
+            return [scaled]
         return [value, scaled]
     return [scaled]
 
@@ -6209,6 +6287,10 @@ def _independent_formula_rows_from_latex(latex: str) -> list[str]:
     cleaned = (latex or "").strip()
     if not cleaned:
         return []
+    for _ in range(4):
+        if not _outer_braces_wrap(cleaned):
+            break
+        cleaned = _normalize_space(cleaned[1:-1])
     if not re.match(r"\\begin\s*\{\s*array\s*\}", cleaned) or not re.search(r"\\end\s*\{\s*array\s*\}", cleaned):
         return []
     inner = _outer_latex_array_body(cleaned)
@@ -6432,7 +6514,7 @@ def _should_merge_split_formula_candidates(first: FormulaCandidate, second: Form
     if (
         first.equation_number
         and not second.equation_number
-        and vertical_gap <= 72.0
+        and vertical_gap <= 20.0
         and _latex_second_lhs_is_used_by_first_rhs(first.latex, second.latex)
     ):
         return True
@@ -6446,7 +6528,7 @@ def _should_merge_split_formula_candidates(first: FormulaCandidate, second: Form
     if (
         second.equation_number
         and not first.equation_number
-        and vertical_gap <= 72.0
+        and vertical_gap <= 20.0
         and _latex_second_lhs_is_used_by_first_rhs(first.latex, second.latex)
     ):
         return True

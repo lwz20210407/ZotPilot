@@ -44,7 +44,9 @@ from zotpilot.feature_extraction.formula_ocr import (
     _merge_standalone_equation_record_with_formula_block,
     _pdf_equation_record_candidate_bbox,
     _pdf_equation_records_in_reading_order,
+    _pdf_records_for_candidate_number_assignment,
     _PdfEquationNumberRecord,
+    _record_formula_number_cues,
     _remove_repeated_regular_pdf_numbers_on_page,
     _scan_pdf_equation_number_records_by_page,
     _should_stop_formula_batch,
@@ -88,6 +90,10 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "Due to the condition f_d[d-d_i]=0 in (29), for d in the current step.",
         "(29)",
     )
+    assert _looks_like_equation_reference_prose_candidate(
+        "2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ：",
+        "(3-6)",
+    )
     assert not is_high_quality_formula_latex(
         r"\text{Figure 2. True stress-strain curves at different temperatures.}"
     )
@@ -121,6 +127,41 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         r"\begin{aligned}&\text{Eq. 6:}\\&\eta=\frac{I_1}{3\sqrt{3J_2}},"
         r"&&\text{(4)}\end{aligned}"
     )
+
+
+def test_formula_number_cues_reject_reference_prose_lists():
+    assert _record_formula_number_cues({"type": "text", "text": "式(4-1)、(4-2)"}) == [
+        "(4-1)",
+        "(4-2)",
+    ]
+    assert _record_formula_number_cues(
+        {"type": "text", "text": "2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ："}
+    ) == []
+
+
+def test_pdf_records_for_assignment_filters_cjk_formula_reference_lists():
+    formula_record = _PdfEquationNumberRecord(
+        number="(3-6)",
+        y_center=488.7,
+        x_right=525.0,
+        standalone=False,
+        bbox=(79.1, 473.1, 525.0, 504.3),
+        text="𝜉= (𝑟 𝑞)3 = cos(3𝜃) (3-6)",
+        page_width=600.0,
+        page_height=800.0,
+    )
+    reference_record = _PdfEquationNumberRecord(
+        number="(3-6)",
+        y_center=278.8,
+        x_right=357.9,
+        standalone=False,
+        bbox=(73.7, 271.6, 357.9, 286.0),
+        text="2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ：",
+        page_width=600.0,
+        page_height=800.0,
+    )
+
+    assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]
 
 
 def test_cached_formula_latex_normalizes_spaced_numeric_constants(tmp_path):
@@ -5438,6 +5479,78 @@ def test_pdf_enrichment_does_not_steal_far_record_before_sequence_gap(tmp_path):
     ]
 
 
+def test_pdf_enrichment_leaves_unnumbered_mineru_row_before_numbered_records(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=62,
+            bbox=(364.0, 200.0, 667.0, 220.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\pmb { \sigma } _ { n e w } ^ { t r i a l } = \pmb { \sigma } _ { o l d }",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=62,
+            bbox=(393.0, 262.0, 606.0, 315.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\bar { \sigma } ^ { t r i a l } = \sqrt { \frac { 3 } { 2 } S : S }",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=62,
+            bbox=(423.0, 349.0, 574.0, 368.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\theta = \operatorname { a r c c o s } ( \xi ) / 3",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=62,
+            bbox=(463.0, 374.0, 534.0, 407.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\eta = \frac { \sigma _ { m } } { \bar { \sigma } }",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=62,
+            bbox=(416.0, 441.0, 581.0, 459.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"F ^ { t r i a l } = \bar { \sigma } ^ { t r i a l } - \bar { \sigma }",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        62: [
+            _PdfEquationNumberRecord("(3-22)", 177.9, 518.8, False, (100.0, 169.5, 518.8, 186.3), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(3-23)", 250.3, 518.8, False, (289.8, 238.5, 518.8, 262.0), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(3-24)", 324.6, 518.8, False, (278.9, 313.0, 518.8, 336.1), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(3-25)", 380.0, 518.8, False, (79.1, 372.3, 518.8, 387.5), "", 595.0, 842.0),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == [
+        "(3-22)",
+        "(3-23)",
+        "",
+        "(3-24)",
+        "(3-25)",
+    ]
+
+
 def test_mineru_cache_provider_merges_definition_continuation_after_pdf_number_enrichment(tmp_path):
     cache_dir = tmp_path / "mineru-cache" / "ITEM123"
     cache_dir.mkdir(parents=True)
@@ -6223,6 +6336,39 @@ def test_split_multirow_independent_formula_candidates_splits_displaystyle_rows(
     assert split[2].latex.startswith(r"\displaystyle \bar")
 
 
+def test_split_multirow_independent_formula_candidates_splits_wrapped_array_rows():
+    candidates = [
+        FormulaCandidate(
+            page_num=5,
+            bbox=(58.0, 253.0, 302.0, 350.0),
+            raw_text="",
+            confidence=0.95,
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+            latex=(
+                r"{ \begin{array} { r l } "
+                r"& { \mathbf { n } = \mathbf { a } _ { 0 } + \mathbf { a } _ { 1 } \varepsilon } \\ "
+                r"& { } \\ "
+                r"& { \alpha = \mathbf { b } _ { 0 } + \mathbf { b } _ { 1 } \varepsilon } \\ "
+                r"& { } \\ "
+                r"& { \mathbf { l n } A = \mathbf { c } _ { 0 } + \mathbf { c } _ { 1 } \varepsilon } \\ "
+                r"& { } \\ "
+                r"& { Q = \mathbf { d } _ { 0 } + \mathbf { d } _ { 1 } \varepsilon } "
+                r"\end{array} }"
+            ),
+        )
+    ]
+
+    split = _split_multirow_independent_formula_candidates(candidates)
+
+    assert [candidate.latex for candidate in split] == [
+        r"\mathbf { n } = \mathbf { a } _ { 0 } + \mathbf { a } _ { 1 } \varepsilon",
+        r"\alpha = \mathbf { b } _ { 0 } + \mathbf { b } _ { 1 } \varepsilon",
+        r"\mathbf { l n } A = \mathbf { c } _ { 0 } + \mathbf { c } _ { 1 } \varepsilon",
+        r"Q = \mathbf { d } _ { 0 } + \mathbf { d } _ { 1 } \varepsilon",
+    ]
+
+
 def test_split_multirow_independent_formula_candidates_ignores_style_only_rows():
     candidates = [
         FormulaCandidate(
@@ -6481,6 +6627,40 @@ def test_merge_split_formula_candidates_merges_definition_continuation_used_by_m
     assert len(merged) == 1
     assert merged[0].equation_number == "(10)"
     assert "f ( \\xi ) =" in merged[0].latex
+
+
+def test_merge_split_formula_candidates_keeps_adjacent_numbered_independent_relations():
+    candidates = [
+        FormulaCandidate(
+            page_num=43,
+            bbox=(381, 231, 563, 270),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"f _ { O r o w a n } = "
+                r"\frac { \Delta \sigma _ { O r o w a n } } { \sigma _ { y m } }"
+            ),
+            equation_number="(2-5)",
+            source="mineru_content_list",
+        ),
+        FormulaCandidate(
+            page_num=43,
+            bbox=(361, 302, 568, 331),
+            raw_text="",
+            confidence=0.95,
+            latex=(
+                r"\Delta \sigma _ { O r o w a n } = "
+                r"\frac { 0.4 G b } { \pi \lambda } "
+                r"\frac { \ln \left( d _ { p } / 2 b \right) } { \sqrt { 1 - \nu } }"
+            ),
+            source="mineru_content_list",
+        ),
+    ]
+
+    merged = _merge_split_formula_candidates(candidates)
+
+    assert len(merged) == 2
+    assert [candidate.equation_number for candidate in merged] == ["(2-5)", ""]
 
 
 def test_merge_split_formula_candidates_keeps_wide_independent_number_gap_rows():
