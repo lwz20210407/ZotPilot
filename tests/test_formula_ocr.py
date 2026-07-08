@@ -41,6 +41,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _looks_like_figure_or_table_reference_record,
     _looks_like_high_density_unnumbered_text_layer_noise,
     _looks_like_isolated_pdf_equation_number_fragment_record,
+    _looks_like_numeric_table_parenthetical_record,
     _looks_like_table_or_step_plain_number_record,
     _merge_inline_equation_record_with_formula_blocks,
     _merge_number_only_pdf_candidates_with_latex_candidates,
@@ -2094,6 +2095,25 @@ def test_figure_reference_record_rejects_parenthetical_number():
     assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (26)", "(26)")
 
 
+def test_equation_reference_prose_rejects_defined_in_eq_reference():
+    text = "b. RSS = R(c) defined in Eq. (19)."
+
+    assert _looks_like_equation_reference_prose_candidate(text, "(19)")
+
+
+def test_numeric_table_parenthetical_record_rejects_decimal_table_cells():
+    assert _looks_like_numeric_table_parenthetical_record("N/A (2.59)", "(2.59)")
+    assert _looks_like_numeric_table_parenthetical_record(
+        "NRB-A 24.02 24.78 25.18 N/A (3.16) (4.83) (3.66)",
+        "(3.16)",
+    )
+    assert _looks_like_numeric_table_parenthetical_record(
+        "GP PS 158.52 N/A 74.71 167.21 63.97 (5.48)",
+        "(5.48)",
+    )
+    assert not _looks_like_numeric_table_parenthetical_record(r"\sigma = E\epsilon (2.59)", "(2.59)")
+
+
 def test_bare_pdf_equation_number_fragment_record_rejects_number_only_tails():
     assert _looks_like_bare_pdf_equation_number_fragment_record("37e)", "(37e)")
     assert _looks_like_bare_pdf_equation_number_fragment_record("38)", "(38)")
@@ -4085,6 +4105,7 @@ def test_pdf_number_scan_skips_figure_references_and_bare_number_tails():
                     (60.0, 120.0, 480.0, 142.0, "in Fig. (26)."),
                     (60.0, 150.0, 480.0, 172.0, "37e)"),
                     (60.0, 180.0, 480.0, 202.0, "38)"),
+                    (60.0, 205.0, 480.0, 227.0, "N/A (2.59)"),
                     (80.0, 220.0, 520.0, 245.0, r"\sigma = E \varepsilon (39)"),
                 ]
             if mode == "dict":

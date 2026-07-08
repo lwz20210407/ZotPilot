@@ -784,6 +784,14 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         ):
             return False
         return True
+    defined_in_reference = re.search(
+        rf"\b(?:defined|reported|shown|listed|given|described)\s+in\s+"
+        rf"(?:eqs?\.?|equations?)\s*[\(（]\s*{number_pattern}\s*[\)）]",
+        normalized,
+        re.IGNORECASE,
+    )
+    if defined_in_reference:
+        return True
     plain_parenthetical_reference = re.search(
         rf"\b(?:see|using|from|in|by|via|condition|conditions|case|step)\b"
         rf"(?:\W+\w+){{0,6}}\W*[\(（]\s*{number_pattern}\s*[\)）]",
@@ -4235,6 +4243,8 @@ def _scan_pdf_equation_number_records_by_page(
                 continue
             if _looks_like_table_or_step_plain_number_record(record.text, record.number):
                 continue
+            if _looks_like_numeric_table_parenthetical_record(record.text, record.number):
+                continue
             if _looks_like_bare_pdf_equation_number_fragment_record(record.text, record.number):
                 continue
             if _looks_like_isolated_pdf_equation_number_fragment_record(record.text, record.number):
@@ -5560,6 +5570,33 @@ def _looks_like_table_or_step_plain_number_record(text: str, equation_number: st
     if arrow_hits >= 2 and number_hits >= 3 and decimal_hits >= 2:
         return True
     return repeated_label_hits >= 3 and (decimal_hits >= 1 or material_or_table_label or number_hits >= 6)
+
+
+def _looks_like_numeric_table_parenthetical_record(text: str, equation_number: str) -> bool:
+    """Reject numeric table cells like ``N/A (2.59)`` misread as formula numbers."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number:
+        return False
+    number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
+    if not re.search(rf"[\(（]\s*{number_pattern}\s*[\)）]", normalized):
+        return False
+    if _has_formula_relation(normalized):
+        return False
+    decimal_hits = len(re.findall(r"[-+−]?\d+\.\d+", normalized))
+    parenthetical_numeric_hits = len(
+        re.findall(r"[\(（]\s*[-+−]?\d+(?:[.:]\d+)?[A-Za-z]?\s*[\)）]", normalized)
+    )
+    sample_label_hits = len(re.findall(r"\b[A-Z]{1,5}(?:-[A-Z0-9]{1,5}){1,4}\b", normalized))
+    has_na = re.search(r"\bN\s*/\s*A\b|\bNA\b", normalized, re.IGNORECASE) is not None
+    has_known_table_token = re.search(r"\b(?:GP|PS|NRB|RN|RB|SH|CH)\b", normalized) is not None
+    if has_na and decimal_hits >= 1:
+        return True
+    if sample_label_hits >= 2 and decimal_hits >= 3:
+        return True
+    if has_known_table_token and decimal_hits >= 2:
+        return True
+    return parenthetical_numeric_hits >= 3 and decimal_hits >= 5
 
 
 def _looks_like_bare_pdf_equation_number_fragment_record(text: str, equation_number: str) -> bool:
