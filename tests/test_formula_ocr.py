@@ -13,6 +13,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     FormulaCandidate,
     SimpleTexFormulaOCRProvider,
     TextLayerFormulaCandidateProvider,
+    _append_missing_pdf_numbered_formula_candidates,
     _assign_equation_number_statuses_from_pdf,
     _candidate_confidence,
     _coerce_provider_result,
@@ -54,6 +55,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     _pdf_equation_records_in_reading_order,
     _pdf_records_for_candidate_number_assignment,
     _PdfEquationNumberRecord,
+    _PdfEquationNumberScanResult,
     _record_formula_number_cues,
     _remove_repeated_regular_pdf_numbers_on_page,
     _scan_pdf_equation_number_records_by_page,
@@ -102,12 +104,32 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "2) 由公式(3-5)和(3-6)计算应力三轴度η和Lode角θ：",
         "(3-6)",
     )
+    assert _looks_like_equation_reference_prose_candidate(
+        "一化模型基础表达式，如公式 （２ －５ ）",
+        "(2-5)",
+    )
+    assert _looks_like_equation_reference_prose_candidate(
+        "公式 （５ －６ ） 。",
+        "(5-6)",
+    )
+    assert _looks_like_equation_reference_prose_candidate(
+        "－４ ）和 （５ －５ ） 。 每个加载循环中的应力应变关系可以表达为",
+        "(5-5)",
+    )
+    assert _looks_like_equation_reference_prose_candidate(
+        "（５ －２４）和公式 （５ ＿２５ ） 。",
+        "(5-24)",
+    )
     assert not _looks_like_equation_reference_prose_candidate(
         (
             "方程（2）中的τ采用Bai-Johnson热塑性本构关系 "
             "τ＝τM γ γi n exp 1＋n 1－γ γi n＋1 （6） n＋1 （6）"
         ),
         "(6)",
+    )
+    assert not _looks_like_equation_reference_prose_candidate(
+        "方程 x = a + b (5-4) y = c + d (5-5)",
+        "(5-5)",
     )
     assert not _looks_like_equation_reference_prose_candidate(
         "Eq. (76). MSE = 1/5 \\sum_i [\\varepsilon_f^{opt}(\\eta_i,L_i)-\\varepsilon_{f,i}]^2",
@@ -197,6 +219,34 @@ def test_pdf_records_for_assignment_filters_cjk_formula_reference_lists():
     )
 
     assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]
+
+
+def test_pdf_equation_scan_filters_spaced_cjk_formula_references():
+    class FakePage:
+        rect = SimpleNamespace(width=595.0, height=842.0)
+
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (150.0, 200.0, 520.0, 240.0, "C = A + Bε^n (5-6)"),
+                    (70.0, 310.0, 520.0, 330.0, "公式 （５ －６ ） 。"),
+                ]
+            if mode == "dict":
+                return {"blocks": []}
+            return ""
+
+    class FakeDoc:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return FakePage()
+
+    scan = _scan_pdf_equation_number_records_by_page(FakeDoc())
+
+    records = scan.records_by_page[1]
+    assert [record.number for record in records] == ["(5-6)"]
+    assert records[0].text == "C = A + Bε^n (5-6)"
 
 
 def test_pdf_records_for_assignment_keeps_eq_intro_formula_blocks():
@@ -2199,6 +2249,51 @@ def test_numeric_table_parenthetical_record_rejects_decimal_table_cells():
         "(5.48)",
     )
     assert not _looks_like_numeric_table_parenthetical_record(r"\sigma = E\epsilon (2.59)", "(2.59)")
+
+
+def test_bibliographic_issue_record_rejects_journal_volume_issue_range():
+    text = "International Journal of Advanced Manufacturing Technology, 2018, 97(5-8)"
+
+    assert _looks_like_bibliographic_issue_number_record(text, "(5-8)")
+    assert _looks_like_bibliographic_issue_number_record(
+        "International Jour nal of Advanced Manufacturing Technology, 20 18, 97(5-8)",
+        "(5-8)",
+    )
+    assert _looks_like_bibliographic_issue_number_record("，97(5-8)", "(5-8)")
+    assert _looks_like_bibliographic_issue_number_record("，\ue5e5９７（５ －８）", "(5-8)")
+    assert _looks_like_bibliographic_issue_number_record("，\ue5e5４６（１ １）", "(1-1)")
+    assert not _looks_like_bibliographic_issue_number_record(r"x = y + 1 (5-8)", "(5-8)")
+
+
+def test_append_missing_pdf_numbered_candidates_skips_bibliographic_issue_records(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    scan = _PdfEquationNumberScanResult(
+        records_by_page={
+            131: [
+                _PdfEquationNumberRecord(
+                    number="(5-8)",
+                    y_center=210.0,
+                    x_right=404.2,
+                    standalone=False,
+                    bbox=(356.6, 201.1, 404.2, 219.2),
+                    text="，\ue5e5９７（５ －８）",
+                    page_width=595.0,
+                    page_height=842.0,
+                )
+            ]
+        },
+        truncated=False,
+    )
+
+    candidates = _append_missing_pdf_numbered_formula_candidates(
+        pdf_path,
+        [],
+        allow_empty=True,
+        scan_result=scan,
+    )
+
+    assert candidates == []
 
 
 def test_bare_pdf_equation_number_fragment_record_rejects_number_only_tails():

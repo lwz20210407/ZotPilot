@@ -771,7 +771,7 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         return False
     word_hits = len(WORD_RE.findall(normalized))
     cjk_hits = len(CJK_CHAR_RE.findall(normalized))
-    number_pattern = re.escape(number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
+    number_pattern = _loose_equation_number_token_pattern(number)
     english_reference = re.search(
         rf"\b(?:see|using|from|in|by|according\s+to|with|of)?\s*"
         rf"(?:eqs?\.?|equations?)\s*"
@@ -817,9 +817,13 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         rf"[\(（]\s*{number_pattern}\s*[\)）]",
         normalized,
     )
-    if cjk_reference and cjk_hits >= 8:
+    if cjk_reference and (cjk_hits >= 2 or word_hits >= 2):
+        if _cjk_equation_reference_match_has_formula_payload(cjk_reference.group(0)):
+            return False
         if _repeated_equation_number_block_has_formula_payload(normalized, number_pattern):
             return False
+        return True
+    if _looks_like_cjk_equation_number_reference_list(normalized, number_pattern):
         return True
     return False
 
@@ -880,6 +884,45 @@ def _repeated_equation_number_block_has_formula_payload(text: str, number_patter
     return (_has_formula_relation(text) or has_pdf_relation_glyph) and (
         _has_formula_structure(text) or has_pdf_relation_glyph
     )
+
+
+def _cjk_equation_reference_match_has_formula_payload(text: str) -> bool:
+    math_signal_count = (
+        len(MATH_SYMBOL_RE.findall(text))
+        + len(PRIVATE_USE_MATH_GLYPH_RE.findall(text))
+        + _math_alnum_char_count(text)
+        + len(re.findall(r"[Α-Ωα-ω∑∏∫√∞∂∇∆]", text))
+    )
+    if math_signal_count < 4 and not _has_pdf_encoded_relation_glyph(text):
+        return False
+    return _has_formula_relation(text) or _has_pdf_encoded_relation_glyph(text)
+
+
+def _looks_like_cjk_equation_number_reference_list(text: str, number_pattern: str) -> bool:
+    if len(CJK_CHAR_RE.findall(text)) < 2:
+        return False
+    math_signal_count = (
+        len(MATH_SYMBOL_RE.findall(text))
+        + len(PRIVATE_USE_MATH_GLYPH_RE.findall(text))
+        + _math_alnum_char_count(text)
+        + len(re.findall(r"[Α-Ωα-ω∑∏∫√∞∂∇∆]", text))
+    )
+    if (_has_formula_relation(text) or _has_formula_structure(text)) and math_signal_count >= 3:
+        return False
+    token = r"[\(（]\s*\d+(?:\s*[.\-–—－−_＿]\s*\d+){0,2}\s*[\)）]"
+    fragment_token = r"(?:[\(（]?\s*[.\-–—－−_＿]\s*\d+\s*[\)）]|\d+\s*[\)）])"
+    target = rf"[\(（]\s*{number_pattern}\s*[\)）]"
+    connector = r"(?:、|,|，|和|及|与|至|到)"
+    optional_label = r"(?:式|公式|方程)?"
+    list_pattern = (
+        rf"(?:{target}\s*{connector}\s*{optional_label}\s*{token}|"
+        rf"{token}\s*{connector}\s*{optional_label}\s*{target}|"
+        rf"{target}\s*{connector}\s*{optional_label}\s*{fragment_token}|"
+        rf"{fragment_token}\s*{connector}\s*{optional_label}\s*{target})"
+    )
+    if re.search(list_pattern, text) is None:
+        return False
+    return bool(re.search(r"(?:式|公式|方程|所示|表达|表示|计算|得到|代入|根据|采用|使用)", text))
 
 
 def _has_pdf_encoded_relation_glyph(text: str) -> bool:
@@ -4073,6 +4116,8 @@ def _append_missing_pdf_numbered_formula_candidates(
                 continue
             if record.number in existing_numbers:
                 continue
+            if _looks_like_bibliographic_issue_number_record(record.text, record.number):
+                continue
             if _looks_like_equation_reference_prose_candidate(record.text, record.number):
                 continue
             bbox = _pdf_equation_record_candidate_bbox(record)
@@ -4248,6 +4293,8 @@ def _scan_pdf_equation_number_records_by_page(
             if _looks_like_pdf_code_listing_record(record.text):
                 continue
             if _looks_like_bibliographic_issue_number_record(record.text, record.number):
+                continue
+            if _looks_like_equation_reference_prose_candidate(record.text, record.number):
                 continue
             if _looks_like_figure_or_table_reference_record(record.text, record.number):
                 continue
@@ -5507,6 +5554,45 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     if not normalized or not normalized_number:
         return False
     loose_number_pattern = _loose_equation_number_token_pattern(normalized_number)
+    pdf_space = r"[\s\ue000-\uf8ff]*"
+    if (
+        "-" in normalized_number
+        and re.fullmatch(
+            rf"[,，]{pdf_space}\d{{1,4}}{pdf_space}[\(（]\s*{loose_number_pattern}\s*[\)）]",
+            normalized,
+        )
+        and not _has_formula_relation(normalized)
+    ):
+        return True
+    compact_range_pattern = r"\s*".join(re.escape(char) for char in normalized_number.replace("-", ""))
+    if (
+        "-" in normalized_number
+        and re.fullmatch(
+            rf"[,，]{pdf_space}\d{{1,4}}{pdf_space}[\(（]\s*{compact_range_pattern}\s*[\)）]",
+            normalized,
+        )
+        and not _has_formula_relation(normalized)
+    ):
+        return True
+    spaced_year_pattern = r"(?:1\s*[89]\s*\d\s*\d|2\s*0\s*\d\s*\d)"
+    journal_issue_pattern = (
+        rf"{spaced_year_pattern}\s*[,，]\s*\d{{1,4}}\s*"
+        rf"[\(（]\s*{loose_number_pattern}\s*[\)）]"
+    )
+    if re.search(journal_issue_pattern, normalized) and not (
+        _has_formula_relation(normalized) or _has_formula_structure(normalized)
+    ):
+        return bool(
+            re.search(
+                r"\b(?:J|Journal|Journals|Proc|Proceedings|Trans|Transactions|"
+                r"Micron|Technology|Science|Materials?)\.?\b",
+                normalized,
+                re.IGNORECASE,
+            )
+            or CJK_CHAR_RE.search(normalized)
+            or re.fullmatch(journal_issue_pattern, normalized)
+            or len(WORD_RE.findall(normalized)) >= 3
+        )
     pattern = (
         rf"(?<!\d)(?:\d\s*){{1,4}}[\(（]{{1,2}}\s*{loose_number_pattern}\s*[\)）]"
         r"\s*[,，:：]\s*\d+\s*[-–—]\s*\d+"
