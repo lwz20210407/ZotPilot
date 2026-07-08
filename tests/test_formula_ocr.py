@@ -2164,6 +2164,16 @@ def test_equation_reference_prose_rejects_defined_in_eq_reference():
     assert _looks_like_equation_reference_prose_candidate(text, "(19)")
 
 
+def test_equation_reference_prose_keeps_formula_block_before_defined_in_eq_reference():
+    text = (
+        "∫εpl f ∫εpl (σm (σm ) ) (σm (σm ) dεpl (17) ) av = 1 "
+        "av = 1 (17) dεpl εpl f εpl σ σ σ σ "
+        "The FFLD fracture criteria considering ( σm ( σm ) ) avas defined in Eq. (17) is"
+    )
+
+    assert not _looks_like_equation_reference_prose_candidate(text, "(17)")
+
+
 def test_numeric_table_parenthetical_record_rejects_decimal_table_cells():
     assert _looks_like_numeric_table_parenthetical_record("N/A (2.59)", "(2.59)")
     assert _looks_like_numeric_table_parenthetical_record(

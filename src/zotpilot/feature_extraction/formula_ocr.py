@@ -795,6 +795,12 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         re.IGNORECASE,
     )
     if defined_in_reference:
+        if _equation_reference_match_has_formula_payload(
+            normalized,
+            defined_in_reference,
+            number_pattern,
+        ):
+            return False
         return True
     plain_parenthetical_reference = re.search(
         rf"\b(?:see|using|from|in|by|via|condition|conditions|case|step)\b"
