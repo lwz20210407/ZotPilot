@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
 from zotpilot.indexer import Indexer
 from zotpilot.models import (
+    Chunk,
     ExtractedFigure,
     ExtractedFormula,
     ExtractedTable,
@@ -68,6 +69,22 @@ def _indexed_item(tmp_path, doc_id: str = "DOC1") -> ZoteroItem:
         tags="formula; safety",
         collections="Regression",
     )
+
+
+def _doc_meta(item: ZoteroItem) -> dict:
+    return {
+        "title": item.title,
+        "authors": item.authors,
+        "year": item.year,
+        "citation_key": item.citation_key,
+        "publication": item.publication,
+        "doi": item.doi,
+        "tags": item.tags,
+        "collections": item.collections,
+        "journal_quartile": "Q1",
+        "pdf_hash": "pdf-hash",
+        "quality_grade": "A",
+    }
 
 
 def _add_existing_non_formula_chunks(store: VectorStore, doc_id: str, doc_meta: dict, sample_chunks) -> None:
@@ -143,6 +160,27 @@ def _indexer_for_formula_write(config, store: VectorStore, item: ZoteroItem) -> 
     return indexer
 
 
+def _indexer_for_formula_batch(config, store: VectorStore, items: list[ZoteroItem]) -> Indexer:
+    items_by_key = {item.item_key: item for item in items}
+    indexer = Indexer.__new__(Indexer)
+    indexer.config = config
+    indexer.store = store
+    indexer.zotero = MagicMock()
+    indexer.zotero.get_item.side_effect = lambda key: items_by_key.get(key)
+    indexer.zotero.get_all_items_with_pdfs.return_value = items
+    indexer.zotero.resolve_original_pdf_path.side_effect = (
+        lambda _key, title, fallback_path: fallback_path
+    )
+    indexer.journal_ranker = MagicMock()
+    indexer.journal_ranker.lookup.return_value = "Q1"
+    indexer._assert_config_hash_current = MagicMock()
+    indexer._ensure_formula_provider_available = MagicMock()
+    indexer._pdf_hash = MagicMock(return_value="pdf-hash")
+    indexer._formula_candidate_provider = object()
+    indexer._formula_provider = None
+    return indexer
+
+
 def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunks(
     tmp_path,
     mock_embedder,
@@ -152,19 +190,7 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
     item = _indexed_item(tmp_path, doc_id)
     config = _formula_config(tmp_path / "chroma")
     store = VectorStore(config.chroma_db_path, mock_embedder)
-    doc_meta = {
-        "title": item.title,
-        "authors": item.authors,
-        "year": item.year,
-        "citation_key": item.citation_key,
-        "publication": item.publication,
-        "doi": item.doi,
-        "tags": item.tags,
-        "collections": item.collections,
-        "journal_quartile": "Q1",
-        "pdf_hash": "pdf-hash",
-        "quality_grade": "A",
-    }
+    doc_meta = _doc_meta(item)
     _add_existing_non_formula_chunks(store, doc_id, doc_meta, sample_chunks)
     protected_ids = {
         chunk_type: _chunk_ids_by_type(store, doc_id, chunk_type)
@@ -241,3 +267,91 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
         r"\sigma = E(\varepsilon-\varepsilon_p)"
     )
     assert formula_results["metadatas"][0]["formula_provider"] == "pdf-extract-kit"
+
+
+def test_index_formulas_isolated_batch_routes_quality_before_writing(
+    tmp_path,
+    mock_embedder,
+    sample_chunks,
+):
+    config = _formula_config(tmp_path / "chroma")
+    store = VectorStore(config.chroma_db_path, mock_embedder)
+    good = _indexed_item(tmp_path, "GOOD1")
+    gap = _indexed_item(tmp_path, "GAP1")
+    semantic = _indexed_item(tmp_path, "SEM1")
+    semantic_chunks = [
+        Chunk(
+            text=r"The constitutive update follows Eq. (3): \sigma = E\varepsilon.",
+            chunk_index=0,
+            page_num=3,
+            char_start=0,
+            char_end=65,
+            section="methods",
+            section_confidence=1.0,
+        )
+    ]
+    for item, chunks in (
+        (good, sample_chunks),
+        (gap, sample_chunks),
+        (semantic, semantic_chunks),
+    ):
+        _add_existing_non_formula_chunks(store, item.item_key, _doc_meta(item), chunks)
+    protected_ids = {
+        item.item_key: {
+            chunk_type: _chunk_ids_by_type(store, item.item_key, chunk_type)
+            for chunk_type in ("text", "table", "figure")
+        }
+        for item in (good, gap, semantic)
+    }
+    indexer = _indexer_for_formula_batch(config, store, [good, gap, semantic])
+    candidates_by_key = {
+        "GOOD1": [_formula_candidate(0, "(1)"), _formula_candidate(1, "(2)")],
+        "GAP1": [_formula_candidate(0, "(1)"), _formula_candidate(1, "(3)")],
+        "SEM1": [_formula_candidate(0, "(1)"), _formula_candidate(1, "(2)")],
+    }
+    formulas_by_key = {
+        "GOOD1": [
+            _formula(0, "(1)", r"\sigma = E\varepsilon", "mineru-cache"),
+            _formula(1, "(2)", r"\eta = \sigma_m/\sigma_{eq}", "mineru-cache"),
+        ],
+    }
+    indexer._recognize_formulas_for_item = MagicMock(
+        side_effect=lambda item, **_kwargs: formulas_by_key.get(item.item_key, [])
+    )
+
+    def extract_for_pdf(pdf_path, **_kwargs):
+        return candidates_by_key[pdf_path.stem]
+
+    with patch(
+        "zotpilot.feature_extraction.formula_ocr.extract_formula_candidates",
+        side_effect=extract_for_pdf,
+    ):
+        result = indexer.index_formulas(
+            item_keys=["GOOD1", "GAP1", "SEM1"],
+            refresh_existing=False,
+        )
+
+    rows_by_key = {row["item_key"]: row for row in result["results"]}
+    assert result["processed"] == 3
+    assert result["formulas_indexed"] == 2
+    assert result["write_blocked"] is True
+    assert result["write_ready"] is False
+    assert result["candidate_quality_review_count"] == 2
+    assert result["semantic_formula_unmatched_reference_paper_count"] == 1
+    assert rows_by_key["GOOD1"]["status"] == "indexed"
+    assert rows_by_key["GAP1"]["status"] == "needs_review"
+    assert rows_by_key["GAP1"]["review_reasons"] == ["missing_equation_number_gap"]
+    assert rows_by_key["SEM1"]["status"] == "needs_review"
+    assert rows_by_key["SEM1"]["review_reasons"] == [
+        "semantic_evidence_unmatched_equation_references"
+    ]
+    assert rows_by_key["SEM1"]["semantic_formula_unmatched_reference_numbers"] == ["(3)"]
+    assert [call.args[0].item_key for call in indexer._recognize_formulas_for_item.call_args_list] == [
+        "GOOD1"
+    ]
+    assert store.count_chunk_types({"GOOD1"})["formula"] == 2
+    assert store.count_chunk_types({"GAP1"})["formula"] == 0
+    assert store.count_chunk_types({"SEM1"})["formula"] == 0
+    for item in (good, gap, semantic):
+        for chunk_type, expected_ids in protected_ids[item.item_key].items():
+            assert _chunk_ids_by_type(store, item.item_key, chunk_type) == expected_ids

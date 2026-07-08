@@ -584,6 +584,50 @@ class VectorStore:
 
         return sorted(chunks, key=lambda c: c.metadata['chunk_index'])
 
+    def get_formula_evidence_chunks(
+        self,
+        doc_id: str,
+        *,
+        chunk_types: tuple[str, ...] = ("text", "table", "figure"),
+        limit_per_type: int = 600,
+    ) -> list[StoredChunk]:
+        """Read non-formula chunks that can provide formula review evidence."""
+        chunks: list[StoredChunk] = []
+        chunk_type_values = tuple(dict.fromkeys(chunk_types))
+        if not chunk_type_values:
+            return chunks
+
+        limit = max(int(limit_per_type), 1)
+        for chunk_type in chunk_type_values:
+            results = self.collection.get(
+                where={
+                    "$and": [
+                        {"doc_id": {"$eq": doc_id}},
+                        {"chunk_type": {"$eq": chunk_type}},
+                    ]
+                },
+                limit=limit,
+                include=["documents", "metadatas"],
+            )
+            for i, chunk_id in enumerate(results.get("ids") or []):
+                metadata = results["metadatas"][i] or {}
+                chunks.append(
+                    StoredChunk(
+                        id=chunk_id,
+                        text=results["documents"][i] or "",
+                        metadata=metadata,
+                    )
+                )
+
+        return sorted(
+            chunks,
+            key=lambda chunk: (
+                int(chunk.metadata.get("page_num", 0) or 0),
+                int(chunk.metadata.get("chunk_index", -1) or -1),
+                chunk.id,
+            ),
+        )
+
     def delete_document(self, doc_id: str) -> None:
         """Remove all chunks for a document."""
         self.collection.delete(where={"doc_id": {"$eq": doc_id}})
