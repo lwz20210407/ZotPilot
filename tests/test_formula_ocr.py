@@ -1465,10 +1465,41 @@ def test_inline_equation_number_record_does_not_merge_cjk_formula_explanation():
     assert "当前应变率" not in merged.text
 
 
+def test_inline_equation_number_record_keeps_self_numbered_split_chapter_block():
+    record = _PdfEquationNumberRecord(
+        number="(2-1)",
+        y_center=417.9,
+        x_right=469.7,
+        standalone=False,
+        bbox=(223.4, 408.5, 469.7, 427.3),
+        text="（２ － １ ） \ue5d2 \ue5cf ｍ\ue5ce３ \ue5d2 \ue5cf",
+        page_width=595.0,
+        page_height=842.0,
+    )
+    blocks = [
+        ((223.4, 408.5, 469.7, 427.3), "（２ － １ ） \ue5d2 \ue5cf ｍ\ue5ce３ \ue5d2 \ue5cf"),
+        ((252.7, 443.1, 469.5, 491.1), "Ｔ\ue5e5＝\ue5e5＾\ue5ce （２ －３ ） \ue5d2 \ue5cf ａ \ue5d2 \ue5cf"),
+        ((252.7, 443.1, 440.5, 487.3), "Ｔ\ue5e5＝\ue5e5＾\ue5ce"),
+    ]
+
+    merged = _merge_inline_equation_record_with_formula_blocks(record, blocks)
+
+    assert merged.bbox == record.bbox
+    assert "Ｔ" not in merged.text
+
+
 def test_pdf_block_equation_number_repairs_split_chapter_number_fragment():
     text = "4 = J 2 = Y （２ （２ － １２） \ue5d2 \ue5cf － １２）"
 
     assert _extract_pdf_block_equation_number(text) == "(2-12)"
+    assert _extract_pdf_block_equation_number("（２ － １ ） \ue5d2 \ue5cf ｍ\ue5ce３ \ue5d2 \ue5cf") == "(2-1)"
+    assert (
+        _extract_pdf_block_equation_number(
+            "Ｔ\ue5a5＝\ue5a5＾\ue5ce （２ －３ ） \ue5d2 \ue5cf ａ \ue5d2 \ue5cf"
+        )
+        == "(2-3)"
+    )
+    assert _extract_pdf_block_equation_number("匕 （２ －４ ） \ue5d2 \ue5cf") == "(2-4)"
 
 
 def test_pdf_block_equation_number_rejects_isolated_suffix_fragment():
@@ -1488,6 +1519,28 @@ def test_split_chapter_equation_number_records_accept_label_only_prefix_with_lef
     records = _split_chapter_equation_number_records(page_blocks, page_width=600.0, page_height=800.0)
 
     assert [record.number for record in records] == ["(2-12)"]
+
+
+def test_split_chapter_equation_number_records_accept_suffix_with_inline_hyphen():
+    page_blocks = [
+        ((228.7, 625.2, 453.7, 635.3), "匕 （２"),
+        ((454.7, 625.4, 469.0, 630.5), "－４ ） \ue5d2 \ue5cf"),
+    ]
+
+    records = _split_chapter_equation_number_records(page_blocks, page_width=600.0, page_height=800.0)
+
+    assert [record.number for record in records] == ["(2-4)"]
+
+
+def test_split_chapter_equation_number_records_accept_missing_hyphen_suffix():
+    page_blocks = [
+        ((352.2, 416.8, 454.5, 455.8), "２\ue5ce （２"),
+        ((455.7, 446.2, 469.7, 451.1), "＿２ ） \ue5d2 \ue5cf"),
+    ]
+
+    records = _split_chapter_equation_number_records(page_blocks, page_width=600.0, page_height=800.0)
+
+    assert [record.number for record in records] == ["(2-2)"]
 
 
 def test_split_chapter_suffix_fragment_match_normalizes_fullwidth_digits():
@@ -4816,7 +4869,7 @@ def test_pdf_enrichment_corrects_same_page_ascii_number_position_mismatch(tmp_pa
     assert [candidate.equation_number for candidate in enriched] == ["(23)", "(24)", "(30)"]
 
 
-def test_pdf_enrichment_position_correction_preserves_non_ascii_and_chapter_numbers(tmp_path):
+def test_pdf_enrichment_position_correction_clears_non_ascii_regular_and_preserves_chapter_numbers(tmp_path):
     candidates = [
         FormulaCandidate(
             page_num=22,
@@ -4890,7 +4943,125 @@ def test_pdf_enrichment_position_correction_preserves_non_ascii_and_chapter_numb
         records_by_page=records_by_page,
     )
 
-    assert [candidate.equation_number for candidate in enriched] == ["(２)", "(2-20)"]
+    assert [candidate.equation_number for candidate in enriched] == ["", "(2-20)"]
+
+
+def test_pdf_enrichment_reassigns_consecutive_chapter_numbers_by_page_order(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=18,
+            bbox=(387.0, 483.0, 550.0, 515.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\sigma_m = \frac{\sigma_1+\sigma_2+\sigma_3}{3}",
+            equation_number="(2-3)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=18,
+            bbox=(302.0, 515.0, 655.0, 558.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\bar\sigma = \sqrt{\frac{(\sigma_1-\sigma_2)^2}{2}}",
+            equation_number="(2-1)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=18,
+            bbox=(455.0, 562.0, 526.0, 595.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"T = \frac{\sigma_m}{\bar\sigma}",
+            equation_number="(2-4)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=18,
+            bbox=(409.0, 736.0, 535.0, 774.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"\bar\varepsilon_p = \sqrt{\frac{2}{3}\varepsilon_p^{ij}\varepsilon_p^{ij}}",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=18,
+            bbox=(398.0, 777.0, 555.0, 817.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"d\bar\varepsilon_p = \sqrt{\frac{2}{3}d\varepsilon_p^{ij}d\varepsilon_p^{ij}}",
+            equation_number="(2-5)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        18: [
+            _PdfEquationNumberRecord("(2-1)", 417.9, 469.7, False, (223.4, 408.5, 469.7, 427.3), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-2)", 436.3, 469.7, False, (352.2, 416.8, 469.7, 455.8), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(２)", 476.3, 454.5, False, (252.7, 469.8, 454.5, 482.9), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-3)", 467.1, 469.5, False, (252.7, 443.1, 469.5, 491.1), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-4)", 650.1, 469.0, False, (241.4, 625.4, 469.0, 674.8), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-5)", 652.8, 468.8, False, (241.4, 630.8, 468.8, 674.8), "", 595.0, 842.0),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == [
+        "(2-1)",
+        "(2-2)",
+        "(2-3)",
+        "(2-4)",
+        "(2-5)",
+    ]
+
+
+def test_pdf_enrichment_clears_fullwidth_regular_fragment_on_chapter_page(tmp_path):
+    candidates = [
+        FormulaCandidate(
+            page_num=19,
+            bbox=(386.0, 283.0, 677.0, 347.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"D_{VGM}^f = \int \exp(1.5T)d\bar\varepsilon_p",
+            equation_number="(２)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+        FormulaCandidate(
+            page_num=19,
+            bbox=(437.0, 216.0, 577.0, 236.0),
+            raw_text="",
+            confidence=0.95,
+            latex=r"D_{VGM}/D_{VGM}^f \geq 1",
+            equation_number="(2-6)",
+            source="mineru_content_list",
+            bbox_coordinate_space="unknown",
+        ),
+    ]
+    records_by_page = {
+        19: [
+            _PdfEquationNumberRecord("(2-6)", 189.6, 476.5, False, (242.9, 184.3, 476.5, 194.9), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-7)", 219.1, 476.4, False, (275.7, 212.9, 476.4, 225.4), "", 595.0, 842.0),
+            _PdfEquationNumberRecord("(2-8)", 276.9, 476.2, False, (266.4, 266.9, 476.2, 286.8), "", 595.0, 842.0),
+        ]
+    }
+
+    enriched = _enrich_candidate_equation_numbers_from_pdf(
+        tmp_path / "paper.pdf",
+        candidates,
+        records_by_page=records_by_page,
+    )
+
+    assert [candidate.equation_number for candidate in enriched] == ["", "(2-6)"]
 
 
 def test_pdf_enrichment_assigns_number_freed_by_position_correction(tmp_path):

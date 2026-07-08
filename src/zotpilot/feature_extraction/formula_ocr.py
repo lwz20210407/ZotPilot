@@ -2593,6 +2593,11 @@ def _enrich_candidate_equation_numbers_from_pdf(
     if not records_by_page:
         return candidates
     candidates = _release_candidate_numbers_mismatched_to_pdf_page(candidates, records_by_page)
+    candidates = _reassign_structured_candidate_numbers_from_consecutive_pdf_page_order(
+        candidates,
+        records_by_page,
+    )
+    candidates = _clear_non_ascii_regular_numbers_on_chapter_pages(candidates, records_by_page)
     if all(candidate.equation_number for candidate in candidates):
         return _correct_structured_candidate_numbers_from_pdf_positions(candidates, records_by_page)
 
@@ -2602,12 +2607,17 @@ def _enrich_candidate_equation_numbers_from_pdf(
     for index, candidate in enumerate(enriched):
         if candidate.equation_number:
             continue
+        if candidate.equation_number_status == "unnumbered":
+            continue
         candidates_by_page.setdefault(candidate.page_num, []).append((index, candidate))
 
     for page_num, page_candidates in candidates_by_page.items():
+        page_records_for_assignment = _pdf_records_for_candidate_number_assignment(
+            records_by_page.get(page_num, [])
+        )
         number_rows = [
             (record.number, record.y_center, record.x_right, record.standalone)
-            for record in records_by_page.get(page_num, [])
+            for record in page_records_for_assignment
         ]
         if not number_rows:
             continue
@@ -2617,7 +2627,7 @@ def _enrich_candidate_equation_numbers_from_pdf(
                 [candidate for _index, candidate in page_candidates]
             )
         ]
-        ordered_number_records = _pdf_equation_records_in_reading_order(records_by_page.get(page_num, []))
+        ordered_number_records = _pdf_equation_records_in_reading_order(page_records_for_assignment)
         ordered_numbers = [
             (record.number, record.y_center, record.x_right, record.standalone)
             for record in ordered_number_records
@@ -2684,8 +2694,29 @@ def _release_candidate_numbers_mismatched_to_pdf_page(
         if candidate.equation_number in page_numbers:
             released.append(candidate)
             continue
-        released.append(replace(candidate, equation_number="", equation_number_status=""))
+        status = (
+            "unnumbered"
+            if _is_non_ascii_regular_equation_number(candidate.equation_number)
+            and _page_has_chapter_equation_records(page_records)
+            else ""
+        )
+        released.append(replace(candidate, equation_number="", equation_number_status=status))
     return released
+
+
+def _page_has_chapter_equation_records(records: list[_PdfEquationNumberRecord]) -> bool:
+    return any(
+        (sequence := _equation_number_sequence_value(record.number)) is not None
+        and sequence[0] in {"hyphen", "decimal"}
+        for record in records
+    )
+
+
+def _is_non_ascii_regular_equation_number(equation_number: str) -> bool:
+    return bool(
+        re.fullmatch(r"\(\d+(?:[A-Za-z])?\)", equation_number or "")
+        and not re.fullmatch(r"\([0-9]+(?:[A-Za-z])?\)", equation_number or "")
+    )
 
 
 def _correct_structured_candidate_numbers_from_pdf_positions(
@@ -2805,6 +2836,104 @@ def _correct_structured_candidate_numbers_from_pdf_positions(
             assigned_numbers=global_assigned_numbers,
         )
     return corrected
+
+
+def _clear_non_ascii_regular_numbers_on_chapter_pages(
+    candidates: list[FormulaCandidate],
+    records_by_page: dict[int, list[_PdfEquationNumberRecord]],
+) -> list[FormulaCandidate]:
+    chapter_pages = {
+        page_num
+        for page_num, records in records_by_page.items()
+        if any(
+            (sequence := _equation_number_sequence_value(record.number)) is not None
+            and sequence[0] in {"hyphen", "decimal"}
+            for record in records
+        )
+    }
+    if not chapter_pages:
+        return candidates
+    cleared: list[FormulaCandidate] = []
+    for candidate in candidates:
+        if (
+            candidate.page_num in chapter_pages
+            and candidate.equation_number
+            and _is_non_ascii_regular_equation_number(candidate.equation_number)
+        ):
+            cleared.append(replace(candidate, equation_number="", equation_number_status="unnumbered"))
+        else:
+            cleared.append(candidate)
+    return cleared
+
+
+def _reassign_structured_candidate_numbers_from_consecutive_pdf_page_order(
+    candidates: list[FormulaCandidate],
+    records_by_page: dict[int, list[_PdfEquationNumberRecord]],
+) -> list[FormulaCandidate]:
+    corrected = list(candidates)
+    for page_num, records in records_by_page.items():
+        ordered_records = [
+            record
+            for record in _pdf_equation_records_in_reading_order(records)
+            if not record.standalone
+            and _is_ascii_equation_number_sequence(record.number)
+            and not _looks_like_equation_reference_prose_candidate(record.text, record.number)
+        ]
+        if len(ordered_records) < 2 or not _same_consecutive_equation_number_sequence(ordered_records):
+            continue
+        page_items = [
+            (index, candidate)
+            for index, candidate in enumerate(corrected)
+            if candidate.page_num == page_num
+            and candidate.latex.strip()
+            and _is_structured_cache_candidate(candidate)
+            and _is_valid_bbox(candidate.bbox)
+        ]
+        if len(page_items) != len(ordered_records):
+            continue
+        ordered_page_items = [
+            (page_items[local_index][0], candidate)
+            for local_index, candidate in _candidate_items_in_reading_order(
+                [candidate for _index, candidate in page_items]
+            )
+        ]
+        for (candidate_index, candidate), record in zip(ordered_page_items, ordered_records):
+            if candidate.equation_number == record.number:
+                continue
+            corrected[candidate_index] = replace(
+                candidate,
+                equation_number=record.number,
+                equation_number_status="",
+            )
+    return corrected
+
+
+def _same_consecutive_equation_number_sequence(records: list[_PdfEquationNumberRecord]) -> bool:
+    sequences = [_equation_number_sequence_value(record.number) for record in records]
+    if len(sequences) < 2 or any(sequence is None for sequence in sequences):
+        return False
+    first = sequences[0]
+    if first is None:
+        return False
+    for offset, sequence in enumerate(sequences):
+        if sequence is None or sequence[:2] != first[:2] or sequence[2] != first[2] + offset:
+            return False
+    return True
+
+
+def _is_ascii_equation_number_sequence(equation_number: str) -> bool:
+    return bool(
+        re.fullmatch(r"\([0-9]+(?:[A-Za-z])?\)", equation_number or "")
+        or re.fullmatch(r"\([0-9]+[.-][0-9]+(?:[A-Za-z])?\)", equation_number or "")
+    )
+
+
+def _pdf_records_for_candidate_number_assignment(
+    records: list[_PdfEquationNumberRecord],
+) -> list[_PdfEquationNumberRecord]:
+    if not _page_has_chapter_equation_records(records):
+        return records
+    return [record for record in records if _is_ascii_equation_number_sequence(record.number)]
 
 
 def _assign_freed_pdf_numbers_to_unnumbered_candidates_across_pages(
@@ -3075,6 +3204,7 @@ def _enrich_candidate_equation_numbers_from_pdf_page_order(
     for index, candidate in enumerate(candidates):
         if (
             candidate.equation_number
+            or candidate.equation_number_status == "unnumbered"
             or not candidate.latex.strip()
             or not _is_structured_cache_candidate(candidate)
         ):
@@ -3085,6 +3215,7 @@ def _enrich_candidate_equation_numbers_from_pdf_page_order(
         if len(page_candidates) < 2:
             continue
         records = records_by_page.get(page_num, [])
+        records = _pdf_records_for_candidate_number_assignment(records)
         if not records:
             continue
         ordered_records = _pdf_equation_records_in_reading_order(records)
@@ -3131,6 +3262,7 @@ def _enrich_candidate_equation_numbers_from_pdf_text(
     for candidate in candidates:
         if (
             not candidate.equation_number
+            and candidate.equation_number_status != "unnumbered"
             and candidate.latex.strip()
             and _is_structured_cache_candidate(candidate)
         ):
@@ -3138,11 +3270,13 @@ def _enrich_candidate_equation_numbers_from_pdf_text(
     for candidate_index, candidate in enumerate(candidates):
         if (
             candidate.equation_number
+            or candidate.equation_number_status == "unnumbered"
             or not candidate.latex.strip()
             or not _is_structured_cache_candidate(candidate)
         ):
             continue
         records = records_by_page.get(candidate.page_num, [])
+        records = _pdf_records_for_candidate_number_assignment(records)
         if not records:
             continue
         scored_records = [
@@ -4038,44 +4172,101 @@ def _split_chapter_equation_number_records(
     records: list[_PdfEquationNumberRecord] = []
     for suffix_bbox, suffix_text, suffix_normalized in entries:
         suffix_match = re.fullmatch(r"(?P<tail>\d{1,2})\)", suffix_normalized)
-        if suffix_match is None:
+        direct_suffix_match = re.fullmatch(
+            r"(?:[-–—－−_＿]\s*)?(?P<tail>\d{1,2})\s*[\)）](?:\s*[\ue000-\uf8ff]+)*",
+            suffix_normalized,
+        )
+        if suffix_match is None and direct_suffix_match is None:
             continue
         if page_width > 0 and suffix_bbox[2] < page_width * 0.70:
             continue
-        hyphen_entry = _find_split_chapter_hyphen_entry(suffix_bbox, entries)
-        if hyphen_entry is None:
-            continue
-        hyphen_bbox, hyphen_text, _hyphen_normalized = hyphen_entry
-        prefix_entry = _find_split_chapter_prefix_entry(hyphen_bbox, entries)
-        if prefix_entry is None:
-            continue
-        prefix_bbox, prefix_text, prefix_normalized = prefix_entry
-        prefix_match = re.search(r"[\(（]\s*(?P<head>\d{1,2})\s*$", prefix_normalized)
-        if prefix_match is None:
-            continue
-        prefix_fragment = prefix_normalized[: prefix_match.start()]
-        if not (
-            _looks_like_split_chapter_number_formula_prefix(prefix_fragment)
-            or _has_nearby_formula_entry_left_of_split_chapter_prefix(prefix_bbox, entries)
-        ):
-            continue
-        number = _format_pdf_equation_number(f"{prefix_match.group('head')}-{suffix_match.group('tail')}")
-        if not number:
-            continue
-        union_bbox = _bbox_union(prefix_bbox, hyphen_bbox, suffix_bbox)
-        records.append(
-            _PdfEquationNumberRecord(
-                number=number,
-                y_center=(union_bbox[1] + union_bbox[3]) / 2.0,
-                x_right=union_bbox[2],
-                standalone=False,
-                bbox=union_bbox,
-                text=_normalize_space(f"{prefix_text} {hyphen_text} {suffix_text}"),
+        if suffix_match is not None:
+            hyphen_entry = _find_split_chapter_hyphen_entry(suffix_bbox, entries)
+            if hyphen_entry is not None:
+                hyphen_bbox, hyphen_text, _hyphen_normalized = hyphen_entry
+                record = _split_chapter_record_from_prefix_suffix(
+                    suffix_bbox,
+                    suffix_text,
+                    entries,
+                    tail=suffix_match.group("tail"),
+                    prefix_anchor_bbox=hyphen_bbox,
+                    middle_bbox=hyphen_bbox,
+                    middle_text=hyphen_text,
+                    page_width=page_width,
+                    page_height=page_height,
+                )
+                if record is not None:
+                    records.append(record)
+                    continue
+        if direct_suffix_match is not None:
+            record = _split_chapter_record_from_prefix_suffix(
+                suffix_bbox,
+                suffix_text,
+                entries,
+                tail=direct_suffix_match.group("tail"),
+                prefix_anchor_bbox=suffix_bbox,
+                middle_bbox=None,
+                middle_text="",
                 page_width=page_width,
                 page_height=page_height,
             )
-        )
+            if record is not None:
+                records.append(record)
     return records
+
+
+def _split_chapter_record_from_prefix_suffix(
+    suffix_bbox: tuple[float, float, float, float],
+    suffix_text: str,
+    entries: list[tuple[tuple[float, float, float, float], str, str]],
+    *,
+    tail: str,
+    prefix_anchor_bbox: tuple[float, float, float, float],
+    middle_bbox: tuple[float, float, float, float] | None,
+    middle_text: str,
+    page_width: float,
+    page_height: float,
+) -> _PdfEquationNumberRecord | None:
+    prefix_entry = _find_split_chapter_prefix_entry(prefix_anchor_bbox, entries)
+    if prefix_entry is None:
+        return None
+    prefix_bbox, prefix_text, prefix_normalized = prefix_entry
+    prefix_match = re.search(r"[\(（]\s*(?P<head>\d{1,2})\s*$", prefix_normalized)
+    if prefix_match is None:
+        return None
+    prefix_fragment = prefix_normalized[: prefix_match.start()]
+    suffix_has_formula_signal = _looks_like_split_chapter_number_formula_prefix(
+        _normalize_space(f"{middle_text} {suffix_text}")
+    )
+    if not (
+        _looks_like_split_chapter_number_formula_prefix(prefix_fragment)
+        or suffix_has_formula_signal
+        or _has_nearby_formula_entry_left_of_split_chapter_prefix(prefix_bbox, entries)
+    ):
+        return None
+    number = _format_pdf_equation_number(f"{prefix_match.group('head')}-{tail}")
+    if not number:
+        return None
+    union_bbox = (
+        _bbox_union(prefix_bbox, middle_bbox, suffix_bbox)
+        if middle_bbox is not None
+        else _bbox_union(prefix_bbox, suffix_bbox)
+    )
+    text = (
+        _normalize_space(f"{prefix_text} {middle_text} {suffix_text}")
+        if middle_text
+        else _normalize_space(f"{prefix_text} {suffix_text}")
+    )
+    return _PdfEquationNumberRecord(
+        number=number,
+        y_center=(union_bbox[1] + union_bbox[3]) / 2.0,
+        x_right=union_bbox[2],
+        standalone=False,
+        bbox=union_bbox,
+        text=text,
+        page_width=page_width,
+        page_height=page_height,
+    )
 
 
 def _has_nearby_formula_entry_left_of_split_chapter_prefix(
@@ -4392,6 +4583,8 @@ def _merge_inline_equation_record_with_formula_blocks(
     """Merge fragmented same-line formula blocks into a numbered tail record."""
     if record.standalone or record.page_width <= 0 or not page_blocks:
         return record
+    if _looks_like_self_numbered_split_chapter_formula_record(record):
+        return record
     rx0, ry0, rx1, ry1 = record.bbox
     record_height = max(1.0, ry1 - ry0)
     y_top = max(0.0, ry0 - max(18.0, record_height * 1.4))
@@ -4450,6 +4643,28 @@ def _merge_inline_equation_record_with_formula_blocks(
         x_right=union_bbox[2],
         bbox=union_bbox,
         text=_normalize_space(selected_text),
+    )
+
+
+def _looks_like_self_numbered_split_chapter_formula_record(record: _PdfEquationNumberRecord) -> bool:
+    sequence = _equation_number_sequence_value(record.number)
+    if sequence is None or sequence[0] not in {"hyphen", "decimal"}:
+        return False
+    normalized = unicodedata.normalize("NFKC", _normalize_space(record.text or ""))
+    if not normalized:
+        return False
+    separator = r"[-–—－−]" if sequence[0] == "hyphen" else r"[.]"
+    chapter_pattern = re.compile(
+        rf"[\(（]\s*{sequence[1]}\s*{separator}\s*{sequence[2]}\s*[\)）]"
+    )
+    match = chapter_pattern.search(normalized)
+    if match is None:
+        return False
+    prefix = normalized[: match.start()]
+    suffix = normalized[match.end() :]
+    return (
+        _looks_like_split_chapter_number_formula_prefix(prefix)
+        or _looks_like_split_chapter_number_formula_prefix(suffix)
     )
 
 
@@ -4617,13 +4832,15 @@ def _extract_noisy_split_chapter_pdf_equation_number(text: str) -> str:
     )
     for chapter_match in reversed(list(chapter_pattern.finditer(normalized))):
         suffix = normalized[chapter_match.end() :]
-        if len(suffix) > 40:
+        formula_prefix = normalized[: chapter_match.start()]
+        prefix_has_formula_signal = _looks_like_split_chapter_number_formula_prefix(formula_prefix)
+        suffix_has_formula_signal = _looks_like_split_chapter_number_formula_prefix(suffix)
+        if len(suffix) > 40 and not suffix_has_formula_signal:
             continue
         suffix_residue = re.sub(r"[\d\s_＿,.;:，。；：()[\]{}（）\-–—－−\ue000-\uf8ff]+", "", suffix)
-        if suffix_residue:
+        if suffix_residue and not (prefix_has_formula_signal or suffix_has_formula_signal):
             continue
-        formula_prefix = normalized[: chapter_match.start()]
-        if not _looks_like_split_chapter_number_formula_prefix(formula_prefix):
+        if not (prefix_has_formula_signal or suffix_has_formula_signal):
             continue
         return _format_pdf_equation_number(
             f"{chapter_match.group('head')}-{chapter_match.group('tail')}"

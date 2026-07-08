@@ -278,7 +278,7 @@ def _formula_equation_number_audit(equation_numbers: list[str]) -> dict[str, obj
     prefixes = sorted({prefix for _number, prefix, _value in values})
     warnings: set[str] = set()
     sequence_breaks: list[dict[str, object]] = []
-    if len(prefixes) > 1:
+    if len(prefixes) > 1 and not all(prefix.isdigit() for prefix in prefixes):
         warnings.add("mixed_equation_number_prefixes")
 
     previous_by_prefix: dict[str, tuple[str, int]] = {}

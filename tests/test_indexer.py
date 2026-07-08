@@ -2656,6 +2656,14 @@ class TestFormulaBackfill:
         assert result["candidate_quality_blocking_paper_count"] == 0
         assert result["candidate_quality_blocking_papers"] == []
 
+    def test_formula_audit_allows_multi_chapter_numeric_prefixes(self):
+        from zotpilot.indexer import _formula_equation_number_audit
+
+        audit = _formula_equation_number_audit(["(2-1)", "(2-2)", "(4-1)", "(4-2)", "(5-1)"])
+
+        assert "mixed_equation_number_prefixes" not in audit["equation_number_warnings"]
+        assert audit["equation_number_prefixes"] == ["2", "4", "5"]
+
     def test_estimate_formula_backfill_does_not_count_unnumbered_cache_rows_as_missing(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer
