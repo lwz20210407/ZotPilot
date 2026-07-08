@@ -352,6 +352,115 @@ class TestFormulaBackfill:
         indexer.store.replace_formulas.assert_not_called()
         indexer.store.add_new_formulas.assert_not_called()
 
+    def test_index_formulas_blocks_semantic_evidence_unmatched_references(self, tmp_path):
+        from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ExtractedFormula, StoredChunk, ZoteroItem
+
+        class EvidenceStore:
+            def __init__(self) -> None:
+                self.replace_formulas = MagicMock()
+                self.add_new_formulas = MagicMock()
+
+            def get_indexed_doc_ids(self) -> set[str]:
+                return {"DOC1"}
+
+            def get_formula_evidence_chunks(self, item_key: str) -> list[StoredChunk]:
+                assert item_key == "DOC1"
+                return [
+                    StoredChunk(
+                        id="DOC1:text:0",
+                        text=(
+                            r"The damage calibration follows Eq. (3), where "
+                            r"$\sigma = E\varepsilon$ defines the elastic branch."
+                        ),
+                        metadata={
+                            "doc_id": "DOC1",
+                            "chunk_type": "text",
+                            "page_num": 4,
+                            "chunk_index": 0,
+                        },
+                    )
+                ]
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path, publication="Nature")
+        candidates = [
+            FormulaCandidate(
+                page_num=1,
+                bbox=(0, 0, 10, 10),
+                raw_text=r"E=mc^2",
+                confidence=0.95,
+                equation_number="(1)",
+                latex=r"E=mc^2",
+                source="mineru_content_list",
+            ),
+            FormulaCandidate(
+                page_num=2,
+                bbox=(0, 20, 10, 30),
+                raw_text=r"\sigma=E\epsilon",
+                confidence=0.95,
+                equation_number="(2)",
+                latex=r"\sigma=E\epsilon",
+                source="mineru_content_list",
+            ),
+        ]
+        formula = ExtractedFormula(
+            page_num=1,
+            formula_index=0,
+            bbox=(0, 0, 10, 10),
+            latex=r"E=mc^2",
+            equation_number="(1)",
+        )
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = EvidenceStore()
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer.journal_ranker = MagicMock()
+        indexer._ensure_formula_provider_available = MagicMock()
+        indexer._assert_config_hash_current = MagicMock()
+        indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=candidates):
+            result = indexer.index_formulas(refresh_existing=False)
+
+        row = result["results"][0]
+        assert result["processed"] == 1
+        assert result["formulas_indexed"] == 0
+        assert result["write_blocked"] is True
+        assert result["write_block_reasons"] == ["candidate_quality_review_required"]
+        assert result["candidate_quality_review_count"] == 1
+        assert result["semantic_formula_evidence_paper_count"] == 1
+        assert result["semantic_formula_unmatched_reference_paper_count"] == 1
+        assert row["status"] == "needs_review"
+        assert row["reason"] == "formula_candidate_review_required"
+        assert row["review_reasons"] == ["semantic_evidence_unmatched_equation_references"]
+        assert row["semantic_formula_evidence"]["unmatched_reference_numbers"] == ["(3)"]
+        assert row["semantic_formula_unmatched_reference_numbers"] == ["(3)"]
+        assert row["recommended_review"] == {
+            "mode": "semantic_formula_evidence_review",
+            "reason": "semantic_evidence_unmatched_equation_references",
+            "item_key": "DOC1",
+            "cli_args": [
+                "estimate-formula-backfill",
+                "--item-key",
+                "DOC1",
+                "--cache-pdf-number-enrichment",
+                "--preview-all-candidates",
+                "--json",
+            ],
+            "opens_pdf": True,
+            "writes_index": False,
+            "uses_external_ocr": False,
+            "evidence_source": "zotpilot_chroma_chunks",
+        }
+        assert result["semantic_formula_evidence_papers"][0]["unmatched_reference_numbers"] == ["(3)"]
+        indexer._recognize_formulas_for_item.assert_not_called()
+        indexer.store.replace_formulas.assert_not_called()
+        indexer.store.add_new_formulas.assert_not_called()
+
     def test_index_formulas_can_override_candidate_quality_warnings(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer

@@ -1999,6 +1999,7 @@ class Indexer:
         ]
         low_confidence_review_queue: list[dict[str, object]] = []
         candidate_quality_review_queue: list[dict[str, object]] = []
+        semantic_formula_evidence_papers: list[dict[str, object]] = []
         provider_calls_used = 0
         external_calls_used = 0
         stopped_reason = ""
@@ -2135,7 +2136,36 @@ class Indexer:
                 if allow_candidate_quality_warnings
                 else _formula_candidate_blocking_review_reasons(candidate_audit)
             )
+            semantic_evidence = _formula_semantic_evidence_for_item(
+                self.store,
+                item_key=item.item_key,
+                candidates=candidates,
+            )
+            if semantic_evidence:
+                if semantic_evidence.get("evidence_count"):
+                    semantic_formula_evidence_papers.append({
+                        "item_key": item.item_key,
+                        "title": item.title,
+                        "evidence_count": semantic_evidence.get("evidence_count", 0),
+                        "unmatched_reference_count": semantic_evidence.get(
+                            "unmatched_reference_count",
+                            0,
+                        ),
+                        "unmatched_reference_numbers": semantic_evidence.get(
+                            "unmatched_reference_numbers",
+                            [],
+                        ),
+                        "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
+                    })
+                semantic_review_reason = _formula_semantic_evidence_review_reason(semantic_evidence)
+                if (
+                    semantic_review_reason
+                    and not allow_candidate_quality_warnings
+                    and semantic_review_reason not in candidate_review_reasons
+                ):
+                    candidate_review_reasons.append(semantic_review_reason)
             if candidate_review_reasons:
+                candidate_review_reasons = sorted(candidate_review_reasons)
                 existing_formula_count = (
                     self._count_existing_formulas(item.item_key)
                     if refresh_existing and not partial_page_backfill
@@ -2154,6 +2184,24 @@ class Indexer:
                     review_reasons=candidate_review_reasons,
                 )
                 row["candidate_audit"] = candidate_audit
+                if semantic_evidence:
+                    row["semantic_formula_evidence"] = semantic_evidence
+                    blocking_summary = _formula_candidate_quality_blocking_row(
+                        item_key=item.item_key,
+                        title=item.title,
+                        candidate_count=candidate_count,
+                        candidate_audit=candidate_audit,
+                        review_reasons=candidate_review_reasons,
+                        semantic_evidence=semantic_evidence,
+                    )
+                    for key in (
+                        "candidate_quality_severity",
+                        "semantic_formula_evidence_count",
+                        "semantic_formula_unmatched_reference_count",
+                        "semantic_formula_unmatched_reference_numbers",
+                    ):
+                        if key in blocking_summary:
+                            row[key] = blocking_summary[key]
                 recommended_review = _formula_candidate_quality_recommended_review(
                     item_key=item.item_key,
                     review_reasons=candidate_review_reasons,
@@ -2457,6 +2505,13 @@ class Indexer:
             "state_path": str(state_path) if state_path is not None else "",
             "candidate_quality_review_count": len(candidate_quality_review_queue),
             "candidate_quality_review_queue": candidate_quality_review_queue,
+            "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
+            "semantic_formula_unmatched_reference_paper_count": sum(
+                1
+                for row in semantic_formula_evidence_papers
+                if int(row.get("unmatched_reference_count", 0) or 0) > 0
+            ),
+            "semantic_formula_evidence_papers": semantic_formula_evidence_papers,
             "low_confidence_review_count": len(low_confidence_review_queue),
             "low_confidence_review_queue": low_confidence_review_queue,
             "warnings": run_warnings,
@@ -2482,6 +2537,12 @@ class Indexer:
                 "provider_calls_used": result["provider_calls_used"],
                 "external_calls_used": result["external_calls_used"],
                 "candidate_quality_review_count": result["candidate_quality_review_count"],
+                "semantic_formula_evidence_paper_count": result[
+                    "semantic_formula_evidence_paper_count"
+                ],
+                "semantic_formula_unmatched_reference_paper_count": result[
+                    "semantic_formula_unmatched_reference_paper_count"
+                ],
                 "low_confidence_review_count": result["low_confidence_review_count"],
                 "high_density_deferred_count": high_density_deferred_count,
                 "high_density_call_threshold": high_density_threshold,
