@@ -1198,6 +1198,9 @@ _NUMBERING_CANDIDATE_REVIEW_WARNINGS = frozenset({
 })
 
 
+_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES = "semantic_evidence_unmatched_equation_references"
+
+
 def _formula_candidate_blocking_review_reasons(candidate_audit: dict[str, object]) -> list[str]:
     """Return candidate-stage warnings that should block OCR/index writes by default."""
     warnings = candidate_audit.get("equation_number_warnings", [])
@@ -1208,6 +1211,13 @@ def _formula_candidate_blocking_review_reasons(candidate_audit: dict[str, object
     if candidate_audit.get("has_truncated_source"):
         reasons.add("fallback_truncated")
     return sorted(reasons)
+
+
+def _formula_semantic_evidence_review_reason(semantic_evidence: dict[str, object]) -> str:
+    """Return a review reason when semantic chunks suggest missed equation references."""
+    if int(semantic_evidence.get("unmatched_reference_count", 0) or 0) > 0:
+        return _SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES
+    return ""
 
 
 def _formula_single_item_readonly_review(
@@ -1313,6 +1323,31 @@ def _formula_candidate_numbering_review(
     }
 
 
+def _formula_semantic_evidence_review(
+    *,
+    item_key: str,
+    reason: str,
+) -> dict[str, object]:
+    """Build a read-only hint for semantic-evidence/candidate mismatches."""
+    return {
+        "mode": "semantic_formula_evidence_review",
+        "reason": reason,
+        "item_key": item_key,
+        "cli_args": [
+            "estimate-formula-backfill",
+            "--item-key",
+            item_key,
+            "--cache-pdf-number-enrichment",
+            "--preview-all-candidates",
+            "--json",
+        ],
+        "opens_pdf": True,
+        "writes_index": False,
+        "uses_external_ocr": False,
+        "evidence_source": "zotpilot_chroma_chunks",
+    }
+
+
 def _formula_candidate_quality_recommended_review(
     *,
     item_key: str,
@@ -1342,6 +1377,11 @@ def _formula_candidate_quality_recommended_review(
         return _formula_candidate_numbering_review(
             item_key=item_key,
             reason=numbering_reasons[0],
+        )
+    if _SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES in review_reasons:
+        return _formula_semantic_evidence_review(
+            item_key=item_key,
+            reason=_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES,
         )
     return None
 
@@ -1384,6 +1424,8 @@ def _formula_candidate_quality_severity(
         return "numbering_gap"
     if reason_set & _NUMBERING_CANDIDATE_REVIEW_WARNINGS:
         return "numbering_review"
+    if reason_set == {_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES}:
+        return "semantic_evidence_unmatched_references"
     return "mixed"
 
 
@@ -1394,6 +1436,7 @@ def _formula_candidate_quality_blocking_row(
     candidate_count: int,
     candidate_audit: dict[str, object],
     review_reasons: list[str],
+    semantic_evidence: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the read-only estimate row for papers that should not be written yet."""
     severity = _formula_candidate_quality_severity(
@@ -1445,6 +1488,18 @@ def _formula_candidate_quality_blocking_row(
             [],
         ),
     }
+    if semantic_evidence:
+        row.update({
+            "semantic_formula_evidence_count": semantic_evidence.get("evidence_count", 0),
+            "semantic_formula_unmatched_reference_count": semantic_evidence.get(
+                "unmatched_reference_count",
+                0,
+            ),
+            "semantic_formula_unmatched_reference_numbers": semantic_evidence.get(
+                "unmatched_reference_numbers",
+                [],
+            ),
+        })
     recommended_review = _formula_candidate_quality_recommended_review(
         item_key=item_key,
         review_reasons=review_reasons,
@@ -2662,6 +2717,8 @@ class Indexer:
                 "estimated_external_calls": provider_call_count if has_external_egress else 0,
                 "error": error,
             }
+            candidate_audit: dict[str, object] = {}
+            candidate_quality_review_reasons: list[str] = []
             if candidates:
                 candidate_audit = _formula_candidate_audit(candidates)
                 row["candidate_audit"] = candidate_audit
@@ -2670,16 +2727,6 @@ class Indexer:
                     if allow_candidate_quality_warnings
                     else _formula_candidate_blocking_review_reasons(candidate_audit)
                 )
-                if candidate_quality_review_reasons:
-                    candidate_quality_blocking_papers.append(
-                        _formula_candidate_quality_blocking_row(
-                            item_key=item.item_key,
-                            title=item.title,
-                            candidate_count=candidate_count,
-                            candidate_audit=candidate_audit,
-                            review_reasons=candidate_quality_review_reasons,
-                        )
-                    )
                 if candidate_audit["has_truncated_source"]:
                     truncated_candidate_papers.append({
                         "item_key": item.item_key,
@@ -2732,6 +2779,25 @@ class Indexer:
                         ),
                         "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
                     })
+                semantic_review_reason = _formula_semantic_evidence_review_reason(semantic_evidence)
+                if (
+                    semantic_review_reason
+                    and not allow_candidate_quality_warnings
+                    and semantic_review_reason not in candidate_quality_review_reasons
+                ):
+                    candidate_quality_review_reasons.append(semantic_review_reason)
+            if candidate_quality_review_reasons:
+                candidate_quality_review_reasons = sorted(candidate_quality_review_reasons)
+                candidate_quality_blocking_papers.append(
+                    _formula_candidate_quality_blocking_row(
+                        item_key=item.item_key,
+                        title=item.title,
+                        candidate_count=candidate_count,
+                        candidate_audit=candidate_audit,
+                        review_reasons=candidate_quality_review_reasons,
+                        semantic_evidence=semantic_evidence,
+                    )
+                )
             if is_deferred_high_density:
                 row["default_batch_status"] = "deferred_high_density"
                 row["high_density_call_threshold"] = high_density_threshold

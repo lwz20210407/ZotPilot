@@ -3577,7 +3577,7 @@ class TestFormulaBackfill:
                 return [
                     StoredChunk(
                         id="DOC1_chunk_0005",
-                        text=r"The calibration follows Eq. (2), where \sigma = E\varepsilon.",
+                        text=r"The calibration follows Eq. (3), where \sigma = E\varepsilon.",
                         metadata={
                             "chunk_type": "text",
                             "page_num": 4,
@@ -3607,7 +3607,7 @@ class TestFormulaBackfill:
                 confidence=0.95,
                 source="mineru_content_list",
                 latex=r"\eta = \sigma_m/\sigma_{eq}",
-                equation_number="(3)",
+                equation_number="(2)",
             ),
         ]
         indexer = Indexer.__new__(Indexer)
@@ -3624,10 +3624,41 @@ class TestFormulaBackfill:
         assert result["estimated_provider_calls"] == 0
         assert evidence["source"] == "zotpilot_chroma_chunks"
         assert evidence["mode"] == "read_only_review_evidence"
-        assert evidence["unmatched_reference_numbers"] == ["(2)"]
+        assert evidence["unmatched_reference_numbers"] == ["(3)"]
         assert result["semantic_formula_evidence_paper_count"] == 1
         assert result["semantic_formula_unmatched_reference_paper_count"] == 1
         assert result["summary"]["semantic_formula_unmatched_reference_paper_count"] == 1
+        assert result["write_blocked"] is True
+        assert result["write_block_reasons"] == ["candidate_quality_review_required"]
+        assert result["candidate_quality_blocking_paper_count"] == 1
+        assert result["candidate_quality_blocking_reason_counts"] == {
+            "semantic_evidence_unmatched_equation_references": 1
+        }
+        blocking_row = result["candidate_quality_blocking_papers"][0]
+        assert blocking_row["review_reasons"] == [
+            "semantic_evidence_unmatched_equation_references"
+        ]
+        assert blocking_row["candidate_quality_severity"] == (
+            "semantic_evidence_unmatched_references"
+        )
+        assert blocking_row["semantic_formula_unmatched_reference_numbers"] == ["(3)"]
+        assert blocking_row["recommended_review"] == {
+            "mode": "semantic_formula_evidence_review",
+            "reason": "semantic_evidence_unmatched_equation_references",
+            "item_key": "DOC1",
+            "cli_args": [
+                "estimate-formula-backfill",
+                "--item-key",
+                "DOC1",
+                "--cache-pdf-number-enrichment",
+                "--preview-all-candidates",
+                "--json",
+            ],
+            "opens_pdf": True,
+            "writes_index": False,
+            "uses_external_ocr": False,
+            "evidence_source": "zotpilot_chroma_chunks",
+        }
 
     def test_estimate_formula_backfill_preview_can_include_all_candidates_without_truncation(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
