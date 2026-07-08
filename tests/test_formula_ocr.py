@@ -95,6 +95,13 @@ def test_equation_reference_prose_filter_rejects_plural_eq_list_reference():
         "(3-6)",
     )
     assert not _looks_like_equation_reference_prose_candidate(
+        (
+            "方程（2）中的τ采用Bai-Johnson热塑性本构关系 "
+            "τ＝τM γ γi n exp 1＋n 1－γ γi n＋1 （6） n＋1 （6）"
+        ),
+        "(6)",
+    )
+    assert not _looks_like_equation_reference_prose_candidate(
         "Eq. (76). MSE = 1/5 \\sum_i [\\varepsilon_f^{opt}(\\eta_i,L_i)-\\varepsilon_{f,i}]^2",
         "(76)",
     )
@@ -262,6 +269,34 @@ def test_pdf_records_for_assignment_keeps_expressed_as_equation_formula_blocks()
         standalone=False,
         bbox=(17.9, 642.0, 544.2, 666.0),
         text="The equivalent diameter can be expressed as Eq. (3) in the following discussion.",
+        page_width=595.0,
+        page_height=842.0,
+    )
+
+    assert _pdf_records_for_candidate_number_assignment([formula_record, reference_record]) == [formula_record]
+
+
+def test_pdf_records_for_assignment_keeps_cjk_repeated_number_formula_blocks():
+    formula_record = _PdfEquationNumberRecord(
+        number="(6)",
+        y_center=566.2,
+        x_right=471.0,
+        standalone=False,
+        bbox=(150.0, 540.0, 471.0, 590.0),
+        text=(
+            "方程（2）中的τ采用Bai-Johnson热塑性本构关系 "
+            "τ＝τM γ γi n exp 1＋n 1－γ γi n＋1 （6） n＋1 （6）"
+        ),
+        page_width=595.0,
+        page_height=842.0,
+    )
+    reference_record = _PdfEquationNumberRecord(
+        number="(6)",
+        y_center=610.0,
+        x_right=471.0,
+        standalone=False,
+        bbox=(150.0, 600.0, 471.0, 624.0),
+        text="由方程（6）可以看出材料参数对剪切强度有影响。",
         page_width=595.0,
         page_height=842.0,
     )

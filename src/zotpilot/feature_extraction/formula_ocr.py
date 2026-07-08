@@ -793,7 +793,11 @@ def _looks_like_equation_reference_prose_candidate(text: str, equation_number: s
         rf"[\(（]\s*{number_pattern}\s*[\)）]",
         normalized,
     )
-    return bool(cjk_reference and cjk_hits >= 8)
+    if cjk_reference and cjk_hits >= 8:
+        if _repeated_equation_number_block_has_formula_payload(normalized, number_pattern):
+            return False
+        return True
+    return False
 
 
 def _equation_reference_match_has_formula_payload(
