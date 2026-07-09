@@ -1793,6 +1793,57 @@ def _formula_estimate_quality_route_counts(
     return counts
 
 
+def _formula_estimate_quality_route_item_keys(
+    rows: list[dict[str, object]],
+) -> dict[str, list[str]]:
+    """Return item_key lists grouped by read-only estimate routing bucket."""
+    item_keys = {
+        "auto_candidate": [],
+        "review_queue": [],
+        "deferred_high_density": [],
+        "skipped": [],
+        "failed": [],
+        "no_formula_candidate": [],
+    }
+    for row in rows:
+        route = str(row.get("quality_route", "") or "")
+        item_key = str(row.get("item_key", "") or "")
+        if route in item_keys and item_key:
+            item_keys[route].append(item_key)
+    return item_keys
+
+
+def _formula_estimate_quality_exclusion_summary(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    """Return compact rows explaining why papers are excluded from auto-write."""
+    excluded: list[dict[str, object]] = []
+    for row in rows:
+        route = str(row.get("quality_route", "") or "")
+        if not route or route == "auto_candidate":
+            continue
+        excluded.append({
+            "item_key": row.get("item_key", ""),
+            "title": row.get("title", ""),
+            "quality_route": route,
+            "route_reason": row.get("route_reason", ""),
+            "candidate_count": row.get("candidate_count", 0),
+            "review_reasons": row.get("review_reasons", []),
+            "recommended_review_mode": row.get("recommended_review_mode", ""),
+            "semantic_formula_unmatched_reference_count": row.get(
+                "semantic_formula_unmatched_reference_count",
+                0,
+            ),
+            "semantic_formula_unmatched_reference_numbers": row.get(
+                "semantic_formula_unmatched_reference_numbers",
+                [],
+            ),
+        })
+    return excluded[:max(limit, 0)]
+
+
 def _formula_estimate_quality_route_summary(
     *,
     results: list[dict[str, object]],
@@ -3662,6 +3713,12 @@ class Indexer:
         formula_quality_route_counts = _formula_estimate_quality_route_counts(
             formula_quality_route_summary
         )
+        formula_quality_route_item_keys = _formula_estimate_quality_route_item_keys(
+            formula_quality_route_summary
+        )
+        formula_quality_exclusion_summary = _formula_estimate_quality_exclusion_summary(
+            formula_quality_route_summary
+        )
         summary = {
             "papers": processed,
             "selected": selected,
@@ -3706,7 +3763,10 @@ class Indexer:
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "formula_review_summary_count": len(formula_review_summary),
             "formula_quality_route_counts": formula_quality_route_counts,
+            "formula_quality_route_item_keys": formula_quality_route_item_keys,
             "formula_quality_route_summary_count": len(formula_quality_route_summary),
+            "formula_auto_candidate_item_keys": formula_quality_route_item_keys["auto_candidate"],
+            "formula_quality_exclusion_summary_count": len(formula_quality_exclusion_summary),
             "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
             "semantic_formula_pdf_number_match_candidate_count": sum(
                 int(row.get("pdf_number_candidate_count", 0) or 0)
@@ -3779,8 +3839,12 @@ class Indexer:
             "formula_review_summary": formula_review_summary,
             "formula_review_summary_count": len(formula_review_summary),
             "formula_quality_route_counts": formula_quality_route_counts,
+            "formula_quality_route_item_keys": formula_quality_route_item_keys,
             "formula_quality_route_summary": formula_quality_route_summary,
             "formula_quality_route_summary_count": len(formula_quality_route_summary),
+            "formula_auto_candidate_item_keys": formula_quality_route_item_keys["auto_candidate"],
+            "formula_quality_exclusion_summary": formula_quality_exclusion_summary,
+            "formula_quality_exclusion_summary_count": len(formula_quality_exclusion_summary),
             "semantic_formula_pdf_number_match_papers": semantic_formula_pdf_number_match_papers,
             "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
             "semantic_formula_pdf_number_match_candidate_count": summary[

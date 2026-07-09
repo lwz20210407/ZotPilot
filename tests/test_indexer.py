@@ -96,7 +96,9 @@ def test_semantic_pdf_number_match_rows_report_pdf_number_candidates():
 
 def test_formula_estimate_quality_route_summary_splits_production_buckets():
     from zotpilot.indexer import (
+        _formula_estimate_quality_exclusion_summary,
         _formula_estimate_quality_route_counts,
+        _formula_estimate_quality_route_item_keys,
         _formula_estimate_quality_route_summary,
     )
 
@@ -199,6 +201,27 @@ def test_formula_estimate_quality_route_summary_splits_production_buckets():
         "failed": 1,
         "no_formula_candidate": 1,
     }
+    assert _formula_estimate_quality_route_item_keys(rows) == {
+        "auto_candidate": ["OK1"],
+        "review_queue": ["REV1", "PLAN1", "SCANREV1"],
+        "deferred_high_density": ["DENSE1"],
+        "skipped": ["SKIP1"],
+        "failed": ["FAIL1"],
+        "no_formula_candidate": ["EMPTY1"],
+    }
+    exclusion_rows = _formula_estimate_quality_exclusion_summary(rows)
+    assert [row["item_key"] for row in exclusion_rows] == [
+        "REV1",
+        "DENSE1",
+        "PLAN1",
+        "SCANREV1",
+        "SKIP1",
+        "FAIL1",
+        "EMPTY1",
+    ]
+    assert exclusion_rows[0]["quality_route"] == "review_queue"
+    assert exclusion_rows[0]["route_reason"] == "semantic_evidence_unmatched_references"
+    assert exclusion_rows[0]["semantic_formula_unmatched_reference_numbers"] == ["(7)"]
     assert rows_by_key["OK1"]["quality_route"] == "auto_candidate"
     assert rows_by_key["REV1"]["quality_route"] == "review_queue"
     assert rows_by_key["REV1"]["recommended_review_mode"] == "semantic_missing_candidate_repair"
@@ -2831,6 +2854,19 @@ class TestFormulaBackfill:
             "no_formula_candidate": 0,
         }
         assert result["summary"]["formula_quality_route_counts"] == result["formula_quality_route_counts"]
+        assert result["formula_quality_route_item_keys"] == {
+            "auto_candidate": [],
+            "review_queue": ["DOC1"],
+            "deferred_high_density": [],
+            "skipped": [],
+            "failed": [],
+            "no_formula_candidate": [],
+        }
+        assert result["summary"]["formula_quality_route_item_keys"] == (
+            result["formula_quality_route_item_keys"]
+        )
+        assert result["formula_auto_candidate_item_keys"] == []
+        assert result["summary"]["formula_auto_candidate_item_keys"] == []
         assert result["formula_quality_route_summary_count"] == 1
         assert result["summary"]["formula_quality_route_summary_count"] == 1
         assert result["formula_quality_route_summary"][0]["item_key"] == "DOC1"
@@ -2842,6 +2878,11 @@ class TestFormulaBackfill:
         assert result["formula_quality_route_summary"][0]["recommended_review_mode"] == (
             "candidate_numbering_review"
         )
+        assert result["formula_quality_exclusion_summary_count"] == 1
+        assert result["summary"]["formula_quality_exclusion_summary_count"] == 1
+        assert result["formula_quality_exclusion_summary"][0]["item_key"] == "DOC1"
+        assert result["formula_quality_exclusion_summary"][0]["quality_route"] == "review_queue"
+        assert result["formula_quality_exclusion_summary"][0]["route_reason"] == "minor_numbering_gap"
         assert result["candidate_quality_blocking_papers"] == [
             {
                 "item_key": "DOC1",
