@@ -15,6 +15,7 @@ def test_extract_equation_references_requires_explicit_marker_or_formula_tail():
     ]
     assert extract_equation_references(r"\sigma = E\varepsilon \quad (2)") == ["(2)"]
     assert extract_equation_references("The year (2024) is not an equation reference.") == []
+    assert extract_equation_references("The model follows Aerens et al. (2011c), not an equation.") == []
     assert extract_equation_references("The equation follows Rice (1976) and is given by Eq. (7).") == [
         "(7)"
     ]

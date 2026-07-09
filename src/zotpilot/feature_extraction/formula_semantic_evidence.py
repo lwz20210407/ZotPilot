@@ -66,9 +66,10 @@ _REFERENCE_LIST_CONNECTOR_RE = re.compile(r"(?:[-~～至到、,，;；和]|and|t
 def _looks_like_citation_year_number(value: str) -> bool:
     """Return True for plain parenthetical years that should not be equation IDs."""
     normalized = normalize_equation_number(value)
-    if not re.fullmatch(r"\d{4}", normalized):
+    match = re.fullmatch(r"(\d{4})(?:[a-z])?", normalized)
+    if match is None:
         return False
-    year = int(normalized)
+    year = int(match.group(1))
     return 1800 <= year <= 2099
 
 
