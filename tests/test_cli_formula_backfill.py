@@ -812,6 +812,133 @@ def test_index_formulas_cli_passes_budget_resume_and_status_jsonl(tmp_path, caps
     )
 
 
+def test_index_formulas_cli_refuses_unscoped_write_without_all_indexed(tmp_path, capsys):
+    from zotpilot.cli import cmd_index_formulas
+
+    config = MagicMock()
+    config.validate.return_value = []
+    config.formula_ocr_enabled = True
+    config.chroma_db_path = tmp_path / "chroma"
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.index_authority.acquire_lease") as acquire_lease,
+        patch("zotpilot.indexer.Indexer") as indexer_cls,
+    ):
+        rc = cmd_index_formulas(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=None,
+                limit=None,
+                all_indexed=False,
+                no_refresh_existing=False,
+                daily_call_budget=2,
+                resume_after=None,
+                no_stop_on_quota=False,
+                status_jsonl=None,
+                low_confidence_threshold=None,
+                include_high_density=False,
+                allow_candidate_quality_warnings=False,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                append_missing_pdf_number_candidates=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                fail_on_write_blocked=False,
+                fail_on_review_required=False,
+                fail_on_unmatched=False,
+                json=False,
+            )
+        )
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "refusing unscoped formula write" in err
+    acquire_lease.assert_not_called()
+    indexer_cls.assert_not_called()
+
+
+def test_index_formulas_cli_all_indexed_allows_intentional_unscoped_write(tmp_path, capsys):
+    from zotpilot.cli import cmd_index_formulas
+
+    config = MagicMock()
+    config.validate.return_value = []
+    config.formula_ocr_enabled = True
+    config.chroma_db_path = tmp_path / "chroma"
+    indexer = MagicMock()
+    indexer.index_formulas.return_value = {
+        "provider": "local",
+        "processed": 1,
+        "formulas_indexed": 1,
+        "provider_calls_used": 0,
+        "external_calls_used": 0,
+        "write_blocked": False,
+        "write_ready": True,
+        "write_review_required": False,
+        "next_action": "Formula chunks were written; verify sampled formula search results before scaling up.",
+        "results": [],
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.index_authority.acquire_lease") as acquire_lease,
+        patch("zotpilot.index_authority.release_lease"),
+        patch("zotpilot.indexer.Indexer", return_value=indexer),
+    ):
+        rc = cmd_index_formulas(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=None,
+                limit=None,
+                all_indexed=True,
+                no_refresh_existing=False,
+                daily_call_budget=0,
+                resume_after=None,
+                no_stop_on_quota=False,
+                status_jsonl=None,
+                low_confidence_threshold=None,
+                include_high_density=False,
+                allow_candidate_quality_warnings=False,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                append_missing_pdf_number_candidates=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                fail_on_write_blocked=False,
+                fail_on_review_required=False,
+                fail_on_unmatched=False,
+                json=False,
+            )
+        )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Formula backfill complete:" in out
+    acquire_lease.assert_called_once()
+    indexer.index_formulas.assert_called_once_with(
+        item_key=None,
+        item_keys=None,
+        limit=None,
+        refresh_existing=True,
+        daily_call_budget=0,
+        resume_after=None,
+        stop_on_quota=True,
+        status_jsonl=None,
+        low_confidence_threshold=None,
+        include_high_density=False,
+        allow_candidate_quality_warnings=False,
+        pdf_fallback_max_pages=None,
+        page_min=None,
+        page_max=None,
+    )
+
+
 def test_index_formulas_cli_shows_review_required_writes(tmp_path, capsys):
     from zotpilot.cli import cmd_index_formulas
 

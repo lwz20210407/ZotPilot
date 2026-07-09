@@ -1116,6 +1116,16 @@ def _formula_estimate_exit_code(args: object, result: dict[str, object]) -> int:
     return 0
 
 
+def _is_unscoped_formula_write(args: object) -> bool:
+    """Return True when a real formula write would target every matched paper."""
+    if getattr(args, "all_indexed", False):
+        return False
+    if getattr(args, "item_key", None) or getattr(args, "item_keys", None):
+        return False
+    limit = getattr(args, "limit", None)
+    return not (isinstance(limit, int) and limit > 0)
+
+
 def cmd_index_formulas(args):
     """Backfill formula chunks for already-indexed documents."""
     from .indexer import ConfigDriftError, FormulaProviderUnavailableError, Indexer
@@ -1184,6 +1194,15 @@ def cmd_index_formulas(args):
         print("[dry-run] No formula chunks were written.")
         _print_formula_backfill_estimate(result, preview_limit=preview_limit)
         return _formula_estimate_exit_code(args, result)
+
+    if _is_unscoped_formula_write(args):
+        print(
+            "Error: refusing unscoped formula write. Run index-formulas --dry-run first, "
+            "then pass --item-key, --item-keys, or --limit; add --all-indexed only when "
+            "you intentionally want to backfill every matched already-indexed paper.",
+            file=sys.stderr,
+        )
+        return 1
 
     from .index_authority import IndexLease, LeaseContentionError, acquire_lease, release_lease
 
@@ -2378,6 +2397,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Backfill a space-separated list of Zotero item keys",
     )
     sub_index_formulas.add_argument("--limit", type=int, default=None, help="Max already-indexed papers to process")
+    sub_index_formulas.add_argument(
+        "--all-indexed",
+        action="store_true",
+        help=(
+            "Allow a non-dry-run formula backfill across every matched already-indexed paper; "
+            "without this, real writes require --item-key, --item-keys, or --limit"
+        ),
+    )
     sub_index_formulas.add_argument(
         "--sample-size",
         type=int,
