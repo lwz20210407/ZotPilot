@@ -2451,6 +2451,43 @@ class IndexResult:
     quality_grade: str = ""  # A/B/C/D/F quality grade per document
 
 
+def _inline_formula_quality_route(result: IndexResult) -> str:
+    """Classify inline formula indexing outcome for batch-scale review."""
+    if result.formula_scope_non_formula_chunk_change:
+        return "scope_violation"
+    if result.formula_review_reasons:
+        return "review_queue"
+    if result.formula_status == "indexed" and result.n_formulas > 0:
+        return "safe_indexed"
+    if result.formula_status == "no_formula":
+        return "no_formula"
+    if result.formula_status == "disabled":
+        return "disabled"
+    if result.formula_status:
+        return "failed"
+    return "not_attempted"
+
+
+def _inline_formula_quality_route_summary(results: list[IndexResult]) -> list[dict[str, object]]:
+    """Return per-paper inline formula route rows for audit dashboards."""
+    rows: list[dict[str, object]] = []
+    for result in results:
+        route = _inline_formula_quality_route(result)
+        rows.append({
+            "item_key": result.item_key,
+            "title": result.title,
+            "route": route,
+            "status": result.status,
+            "n_formulas": result.n_formulas,
+            "formula_status": result.formula_status,
+            "formula_reason": result.formula_reason,
+            "review_reasons": result.formula_review_reasons,
+            "scope_non_formula_chunk_change": result.formula_scope_non_formula_chunk_change,
+            "scope_non_formula_chunk_deltas": result.formula_scope_non_formula_chunk_deltas,
+        })
+    return rows
+
+
 class Indexer:
     """
     Orchestrates the full indexing pipeline.
@@ -5163,6 +5200,7 @@ class Indexer:
 
         self._save_empty_docs(empty_docs)
 
+        formula_quality_route_summary = _inline_formula_quality_route_summary(results)
         counts = {
             "indexed": sum(1 for r in results if r.status == "indexed"),
             "failed": sum(1 for r in results if r.status == "failed"),
@@ -5189,6 +5227,13 @@ class Indexer:
                 and r.formula_status == "indexed"
                 and not r.formula_scope_non_formula_chunk_change
             ),
+            "formula_quality_route_counts": dict(Counter(
+                row["route"]
+                for row in formula_quality_route_summary
+                if isinstance(row.get("route"), str)
+            )),
+            "formula_quality_route_summary_count": len(formula_quality_route_summary),
+            "formula_quality_route_summary": formula_quality_route_summary,
             "formula_status_counts": dict(Counter(
                 r.formula_status
                 for r in results

@@ -5385,6 +5385,21 @@ class TestSkipTracking:
         assert result["formulas_indexed_safe"] == 0
         assert result["formulas_indexed_unsafe"] == 1
         assert result["formula_safe_indexed_item_count"] == 0
+        assert result["formula_quality_route_counts"] == {"scope_violation": 1}
+        assert result["formula_quality_route_summary"] == [
+            {
+                "item_key": "K1",
+                "title": "Paper A",
+                "route": "scope_violation",
+                "status": "indexed",
+                "n_formulas": 1,
+                "formula_status": "failed_scope_violation",
+                "formula_reason": "formula_scope_non_formula_chunk_changed",
+                "review_reasons": [],
+                "scope_non_formula_chunk_change": True,
+                "scope_non_formula_chunk_deltas": {"text": -1},
+            }
+        ]
         assert result["formula_status_counts"] == {"failed_scope_violation": 1}
         assert result["formula_scope_violation_count"] == 1
         assert result["formula_scope_violation_items"] == [
@@ -5444,6 +5459,21 @@ class TestSkipTracking:
         assert result["formulas_indexed_safe"] == 2
         assert result["formulas_indexed_unsafe"] == 0
         assert result["formula_safe_indexed_item_count"] == 1
+        assert result["formula_quality_route_counts"] == {"safe_indexed": 1}
+        assert result["formula_quality_route_summary"] == [
+            {
+                "item_key": "K1",
+                "title": "Paper A",
+                "route": "safe_indexed",
+                "status": "indexed",
+                "n_formulas": 2,
+                "formula_status": "indexed",
+                "formula_reason": "",
+                "review_reasons": [],
+                "scope_non_formula_chunk_change": False,
+                "scope_non_formula_chunk_deltas": {},
+            }
+        ]
         assert result["formula_status_counts"] == {"indexed": 1}
 
     def test_index_all_surfaces_inline_formula_review_reasons(self, tmp_path):
@@ -5491,6 +5521,21 @@ class TestSkipTracking:
         assert result["formulas_indexed_safe"] == 0
         assert result["formulas_indexed_unsafe"] == 0
         assert result["formula_safe_indexed_item_count"] == 0
+        assert result["formula_quality_route_counts"] == {"review_queue": 1}
+        assert result["formula_quality_route_summary"] == [
+            {
+                "item_key": "K1",
+                "title": "Paper A",
+                "route": "review_queue",
+                "status": "indexed",
+                "n_formulas": 0,
+                "formula_status": "skipped_candidate_review",
+                "formula_reason": "candidate_quality_review_required",
+                "review_reasons": review_reasons,
+                "scope_non_formula_chunk_change": False,
+                "scope_non_formula_chunk_deltas": {},
+            }
+        ]
         assert result["formula_status_counts"] == {"skipped_candidate_review": 1}
         assert result["formula_review_reason_counts"] == {
             "missing_equation_number_gap": 1,
