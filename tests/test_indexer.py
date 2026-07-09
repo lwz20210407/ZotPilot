@@ -2836,6 +2836,52 @@ class TestFormulaBackfill:
         assert rows[0]["high_density_trigger"] == "candidate_count"
         assert rows[0]["estimate_incomplete_reason"] == "scan_limit"
 
+    def test_formula_review_summary_includes_high_density_plan_summary(self):
+        from zotpilot.indexer import _formula_review_summary_rows
+
+        rows = _formula_review_summary_rows(
+            candidate_quality_rows=[
+                {
+                    "item_key": "DOC1",
+                    "title": "Book",
+                    "candidate_count": 1200,
+                    "candidate_quality_severity": "large_numbering_gap",
+                    "review_reasons": ["large_equation_number_gap"],
+                    "recommended_review": {
+                        "mode": "candidate_numbering_review",
+                        "reason": "large_equation_number_gap",
+                    },
+                }
+            ],
+            dense_formula_rows=[
+                {
+                    "item_key": "DOC1",
+                    "title": "Book",
+                    "candidate_count": 1200,
+                    "estimated_provider_calls": 1200,
+                    "high_density_trigger": "candidate_count",
+                }
+            ],
+            scan_limited_rows=[],
+            high_density_plan_rows=[
+                {
+                    "item_key": "DOC1",
+                    "segment_count": 16,
+                    "page_min": 16,
+                    "page_max": 394,
+                    "segment_candidate_limit": 160,
+                    "segment_provider_call_limit": 80,
+                }
+            ],
+        )
+
+        assert rows[0]["high_density_plan_available"] is True
+        assert rows[0]["high_density_plan_segment_count"] == 16
+        assert rows[0]["high_density_plan_page_min"] == 16
+        assert rows[0]["high_density_plan_page_max"] == 394
+        assert rows[0]["high_density_plan_candidate_limit"] == 160
+        assert rows[0]["high_density_plan_provider_call_limit"] == 80
+
     def test_estimate_formula_backfill_blocks_low_quality_cached_latex(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer

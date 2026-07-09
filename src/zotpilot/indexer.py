@@ -1839,6 +1839,7 @@ def _formula_review_summary_rows(
     candidate_quality_rows: list[dict[str, object]],
     dense_formula_rows: list[dict[str, object]],
     scan_limited_rows: list[dict[str, object]],
+    high_density_plan_rows: list[dict[str, object]] | None = None,
     limit: int = 50,
 ) -> list[dict[str, object]]:
     """Return compact per-paper review rows for large read-only estimates."""
@@ -1864,6 +1865,11 @@ def _formula_review_summary_rows(
     dense_by_key = {
         str(row.get("item_key", "") or ""): row
         for row in dense_formula_rows
+        if row.get("item_key")
+    }
+    plan_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in (high_density_plan_rows or [])
         if row.get("item_key")
     }
     for row in candidate_quality_rows:
@@ -1926,6 +1932,9 @@ def _formula_review_summary_rows(
         if dense_row:
             summary_row["high_density_trigger"] = dense_row.get("high_density_trigger", "")
             summary_row["estimated_provider_calls"] = dense_row.get("estimated_provider_calls", 0)
+        plan_row = plan_by_key.get(item_key)
+        if plan_row:
+            summary_row.update(_formula_high_density_plan_summary_fields(plan_row))
         if scan_limited_row:
             summary_row["estimate_incomplete_reason"] = scan_limited_row.get("reason", "scan_limit")
         rows.append(summary_row)
@@ -1950,6 +1959,7 @@ def _formula_review_summary_rows(
             "equation_number_warnings": [],
             "estimated_provider_calls": row.get("estimated_provider_calls", 0),
             "high_density_trigger": row.get("high_density_trigger", ""),
+            **_formula_high_density_plan_summary_fields(plan_by_key.get(str(row.get("item_key", "") or ""), {})),
         })
     for row in scan_limited_rows:
         if str(row.get("item_key", "") or "") in seen_item_keys:
@@ -1975,6 +1985,20 @@ def _formula_review_summary_rows(
             str(row.get("item_key", "")),
         ),
     )[:max(limit, 0)]
+
+
+def _formula_high_density_plan_summary_fields(plan_row: dict[str, object] | None) -> dict[str, object]:
+    """Return compact high-density page-window fields for review summaries."""
+    if not isinstance(plan_row, dict) or not plan_row:
+        return {}
+    return {
+        "high_density_plan_available": True,
+        "high_density_plan_segment_count": plan_row.get("segment_count", 0),
+        "high_density_plan_page_min": plan_row.get("page_min", 0),
+        "high_density_plan_page_max": plan_row.get("page_max", 0),
+        "high_density_plan_candidate_limit": plan_row.get("segment_candidate_limit", 0),
+        "high_density_plan_provider_call_limit": plan_row.get("segment_provider_call_limit", 0),
+    }
 
 
 def _structural_formula_review_reasons(review_rows: list[dict[str, object]]) -> list[str]:
@@ -3490,6 +3514,7 @@ class Indexer:
             candidate_quality_rows=candidate_quality_blocking_papers,
             dense_formula_rows=dense_formula_papers,
             scan_limited_rows=scan_limited_high_density_papers,
+            high_density_plan_rows=high_density_backfill_plans,
         )
         semantic_formula_pdf_number_match_papers = _formula_semantic_pdf_number_match_rows(results)
         summary = {
