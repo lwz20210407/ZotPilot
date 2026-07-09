@@ -5170,6 +5170,25 @@ class Indexer:
             "skipped": sum(1 for r in results if r.status == "skipped"),
             "already_indexed": len(indexed_ids),
             "formulas_indexed": sum(r.n_formulas for r in results),
+            "formulas_indexed_safe": sum(
+                r.n_formulas
+                for r in results
+                if r.formula_status == "indexed"
+                and not r.formula_scope_non_formula_chunk_change
+            ),
+            "formulas_indexed_unsafe": sum(
+                r.n_formulas
+                for r in results
+                if r.formula_status != "indexed"
+                or r.formula_scope_non_formula_chunk_change
+            ),
+            "formula_safe_indexed_item_count": sum(
+                1
+                for r in results
+                if r.n_formulas > 0
+                and r.formula_status == "indexed"
+                and not r.formula_scope_non_formula_chunk_change
+            ),
             "formula_status_counts": dict(Counter(
                 r.formula_status
                 for r in results

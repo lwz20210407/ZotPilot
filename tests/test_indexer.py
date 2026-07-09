@@ -5382,6 +5382,9 @@ class TestSkipTracking:
 
         assert result["indexed"] == 1
         assert result["formulas_indexed"] == 1
+        assert result["formulas_indexed_safe"] == 0
+        assert result["formulas_indexed_unsafe"] == 1
+        assert result["formula_safe_indexed_item_count"] == 0
         assert result["formula_status_counts"] == {"failed_scope_violation": 1}
         assert result["formula_scope_violation_count"] == 1
         assert result["formula_scope_violation_items"] == [
@@ -5404,6 +5407,44 @@ class TestSkipTracking:
         ][0]
         assert paper_finished["formula_scope_non_formula_chunk_change"] is True
         assert paper_finished["formula_scope_non_formula_chunk_deltas"] == {"text": -1}
+
+    def test_index_all_reports_safe_inline_formula_indexing_count(self, tmp_path):
+        item = self._make_item("K1", "Paper A", has_pdf=True)
+        indexer = self._make_indexer([item])
+        self._patch_indexer(indexer)
+        indexer.store.db_path = tmp_path / "chroma"
+        indexer.store.get_indexed_doc_ids.return_value = set()
+
+        mock_extraction = MagicMock()
+        mock_extraction.pages = [MagicMock()]
+        mock_extraction.stats = {"total_pages": 1, "text_pages": 1, "ocr_pages": 0, "empty_pages": 0}
+        mock_extraction.quality_grade = "A"
+        mock_extraction.pending_vision = None
+        extraction_stats = {
+            "total_pages": 1,
+            "text_pages": 1,
+            "ocr_pages": 0,
+            "empty_pages": 0,
+            "n_formulas": 2,
+            "formula_index_status": "indexed",
+            "formula_index_reason": "",
+            "formula_scope_non_formula_chunk_change": False,
+        }
+
+        with patch("zotpilot.indexer.extract_document", return_value=mock_extraction), \
+             patch.object(
+                 indexer,
+                 "_index_extraction_with_retry",
+                 return_value=(1, 0, "", extraction_stats, "A"),
+             ):
+            result = indexer.index_all(batch_size=None)
+
+        assert result["indexed"] == 1
+        assert result["formulas_indexed"] == 2
+        assert result["formulas_indexed_safe"] == 2
+        assert result["formulas_indexed_unsafe"] == 0
+        assert result["formula_safe_indexed_item_count"] == 1
+        assert result["formula_status_counts"] == {"indexed": 1}
 
     def test_index_all_surfaces_inline_formula_review_reasons(self, tmp_path):
         item = self._make_item("K1", "Paper A", has_pdf=True)
@@ -5447,6 +5488,9 @@ class TestSkipTracking:
 
         assert result["indexed"] == 1
         assert result["formulas_indexed"] == 0
+        assert result["formulas_indexed_safe"] == 0
+        assert result["formulas_indexed_unsafe"] == 0
+        assert result["formula_safe_indexed_item_count"] == 0
         assert result["formula_status_counts"] == {"skipped_candidate_review": 1}
         assert result["formula_review_reason_counts"] == {
             "missing_equation_number_gap": 1,
