@@ -33,6 +33,11 @@ def test_extract_equation_references_ignores_non_equation_numbers_in_marker_wind
     ]
     assert extract_equation_references("铺层方式0、方式1、方式2、方式3和方式4均不是公式编号。") == []
     assert extract_equation_references("这种形式(1)和计算模式(2)不应视为公式。") == []
+    assert extract_equation_references("The generalized equation 131 is discussed in the next line.") == []
+    assert extract_equation_references("The resultant formula 266 is a line-number artifact.") == []
+    assert extract_equation_references("Equation (10) indicates the equivalent stress for 261 components.") == [
+        "(10)"
+    ]
 
 
 def test_extract_equation_references_keeps_connected_equation_lists():
@@ -66,6 +71,12 @@ def test_formula_semantic_evidence_summary_flags_unmatched_references():
     assert summary["equation_reference_numbers"] == ["(2)"]
     assert summary["unmatched_reference_numbers"] == ["(2)"]
     assert summary["unmatched_reference_count"] == 1
+    assert summary["reference_match_status"] == "no_match"
+    assert summary["reference_coverage_ratio"] == 0.0
+    assert summary["review_flags"] == [
+        "semantic_unmatched_references",
+        "semantic_no_candidate_reference_overlap",
+    ]
     assert summary["top_evidence"][0]["chunk_id"] == "DOC1_chunk_0003"
     assert "not treated as verified formulas" in summary["review_note"]
 
@@ -89,6 +100,27 @@ def test_formula_semantic_evidence_matches_collapsed_chapter_number_aliases():
     assert set(summary["equation_reference_numbers"]) == {"(49)", "(316)"}
     assert set(summary["matched_reference_numbers"]) == {"(49)", "(316)"}
     assert summary["unmatched_reference_numbers"] == []
+    assert summary["reference_match_status"] == "all_matched"
+    assert summary["reference_coverage_ratio"] == 1.0
+
+
+def test_formula_semantic_evidence_tracks_formula_like_chunks_without_numbers():
+    chunks = [
+        StoredChunk(
+            id="DOC1_chunk_0007",
+            text=r"The calibrated relation is \sigma = A + B\varepsilon^n.",
+            metadata={"chunk_type": "text", "page_num": 7, "chunk_index": 7, "section": "results"},
+        ),
+    ]
+
+    summary = summarize_formula_semantic_evidence(chunks, candidate_equation_numbers=[])
+
+    assert summary["evidence_count"] == 1
+    assert summary["equation_reference_numbers"] == []
+    assert summary["unmatched_reference_count"] == 0
+    assert summary["reference_match_status"] == "no_references"
+    assert summary["formula_evidence_without_reference_count"] == 1
+    assert summary["review_flags"] == ["formula_like_evidence_without_equation_numbers"]
 
 
 def test_formula_hint_and_score_prioritize_math_signal():

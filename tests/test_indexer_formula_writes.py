@@ -358,7 +358,14 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert report_by_key["GAP1"]["review_reasons"] == ["missing_equation_number_gap"]
     assert report_by_key["SEM1"]["route"] == "review_queue"
     assert report_by_key["SEM1"]["recommended_review_mode"] == "semantic_formula_evidence_review"
+    assert report_by_key["SEM1"]["semantic_evidence_count"] >= 1
+    assert report_by_key["SEM1"]["semantic_unmatched_reference_count"] == 1
     assert report_by_key["SEM1"]["semantic_unmatched_reference_numbers"] == ["(3)"]
+    assert report_by_key["SEM1"]["semantic_reference_match_status"] == "no_match"
+    assert set(report_by_key["SEM1"]["semantic_review_flags"]) >= {
+        "semantic_unmatched_references",
+        "semantic_no_candidate_reference_overlap",
+    }
     assert result["candidate_quality_review_count"] == 2
     assert result["semantic_formula_unmatched_reference_paper_count"] == 1
     assert rows_by_key["GOOD1"]["status"] == "indexed"

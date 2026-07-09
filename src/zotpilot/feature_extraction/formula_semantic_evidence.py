@@ -50,9 +50,9 @@ _EXPLICIT_REF_WINDOW_RE = re.compile(
 )
 _PAREN_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)", re.IGNORECASE)
 _EXPLICIT_MARKER_NUMBER_RE = re.compile(
-    rf"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*"
-    rf"(?:[\(:：]\s*)?"
-    rf"([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
+    rf"(?P<marker>\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*"
+    rf"(?P<open>[\(:：]\s*)?"
+    rf"(?P<number>[0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
     re.IGNORECASE,
 )
 _TRAILING_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)\s*$", re.IGNORECASE)
@@ -88,6 +88,20 @@ def _explicit_reference_continuation(prefix: str) -> bool:
     """Return True when a parenthetical number continues an Eq./formula list."""
     compact = prefix[-18:]
     return bool(_REFERENCE_LIST_CONNECTOR_RE.search(compact))
+
+
+def _looks_like_unparenthesized_line_number(raw: str, marker: str, has_grouping: bool) -> bool:
+    """Return True for OCR/text-layer line numbers after words like ``equation``."""
+    if has_grouping:
+        return False
+    normalized = normalize_equation_number(raw)
+    if not re.fullmatch(r"\d+", normalized):
+        return False
+    value = int(normalized)
+    if value <= 80:
+        return False
+    marker_text = (marker or "").lower().rstrip(".")
+    return marker_text in {"equation", "equations", "formula", "formulas", "formulae"}
 
 
 @dataclass(frozen=True)
@@ -155,8 +169,13 @@ def extract_equation_references(text: str) -> list[str]:
         window_numbers: list[tuple[int, str]] = []
         explicit_positions: set[int] = set()
         for match in _EXPLICIT_MARKER_NUMBER_RE.finditer(window):
-            window_numbers.append((match.start(1), match.group(1)))
-            explicit_positions.add(match.start(1))
+            raw_number = match.group("number")
+            marker = match.group("marker")
+            has_grouping = bool(match.group("open"))
+            if _looks_like_unparenthesized_line_number(raw_number, marker, has_grouping):
+                continue
+            window_numbers.append((match.start("number"), raw_number))
+            explicit_positions.add(match.start("number"))
         for match in _PAREN_NUMBER_RE.finditer(window):
             if match.start(1) not in explicit_positions and not _explicit_reference_continuation(
                 window[: match.start()]
@@ -295,10 +314,32 @@ def summarize_formula_semantic_evidence(
         for display_number in reference_numbers
         if normalize_equation_number(display_number) in candidate_match_numbers
     ]
+    formula_evidence_without_reference_count = sum(
+        1 for row in evidence
+        if row.score > 0 and not row.equation_numbers
+    )
+    reference_coverage_ratio = (
+        round(len(matched) / len(reference_numbers), 4)
+        if reference_numbers
+        else 1.0
+    )
+    review_flags: list[str] = []
+    if unmatched:
+        review_flags.append("semantic_unmatched_references")
+    if reference_numbers and not matched:
+        review_flags.append("semantic_no_candidate_reference_overlap")
+    if formula_evidence_without_reference_count:
+        review_flags.append("formula_like_evidence_without_equation_numbers")
+    reference_match_status = "no_references"
+    if reference_numbers and unmatched:
+        reference_match_status = "partial_match" if matched else "no_match"
+    elif reference_numbers:
+        reference_match_status = "all_matched"
     return {
         "source": "zotpilot_chroma_chunks",
         "mode": "read_only_review_evidence",
         "evidence_count": len(evidence),
+        "formula_evidence_without_reference_count": formula_evidence_without_reference_count,
         "equation_reference_numbers": reference_numbers,
         "candidate_equation_numbers": [
             format_equation_number(number)
@@ -307,6 +348,9 @@ def summarize_formula_semantic_evidence(
         "matched_reference_numbers": matched,
         "unmatched_reference_numbers": unmatched,
         "unmatched_reference_count": len(unmatched),
+        "reference_coverage_ratio": reference_coverage_ratio,
+        "reference_match_status": reference_match_status,
+        "review_flags": review_flags,
         "top_evidence": [
             {
                 "chunk_id": row.chunk_id,

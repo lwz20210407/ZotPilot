@@ -439,6 +439,12 @@ class TestFormulaBackfill:
         assert row["review_reasons"] == ["semantic_evidence_unmatched_equation_references"]
         assert row["semantic_formula_evidence"]["unmatched_reference_numbers"] == ["(3)"]
         assert row["semantic_formula_unmatched_reference_numbers"] == ["(3)"]
+        assert row["semantic_formula_reference_match_status"] == "no_match"
+        assert row["semantic_formula_reference_coverage_ratio"] == 0.0
+        assert row["semantic_formula_review_flags"] == [
+            "semantic_unmatched_references",
+            "semantic_no_candidate_reference_overlap",
+        ]
         assert row["recommended_review"] == {
             "mode": "semantic_formula_evidence_review",
             "reason": "semantic_evidence_unmatched_equation_references",
@@ -457,6 +463,11 @@ class TestFormulaBackfill:
             "evidence_source": "zotpilot_chroma_chunks",
         }
         assert result["semantic_formula_evidence_papers"][0]["unmatched_reference_numbers"] == ["(3)"]
+        assert result["semantic_formula_evidence_papers"][0]["reference_match_status"] == "no_match"
+        assert result["semantic_formula_evidence_papers"][0]["review_flags"] == [
+            "semantic_unmatched_references",
+            "semantic_no_candidate_reference_overlap",
+        ]
         indexer._recognize_formulas_for_item.assert_not_called()
         indexer.store.replace_formulas.assert_not_called()
         indexer.store.add_new_formulas.assert_not_called()
@@ -2586,6 +2597,11 @@ class TestFormulaBackfill:
                 "candidate_count": 3,
                 "semantic_formula_unmatched_reference_count": 0,
                 "semantic_formula_unmatched_reference_numbers": [],
+                "semantic_formula_evidence_count": 0,
+                "semantic_formula_evidence_without_reference_count": 0,
+                "semantic_formula_reference_match_status": "",
+                "semantic_formula_reference_coverage_ratio": 0.0,
+                "semantic_formula_review_flags": [],
                 "equation_number_warnings": ["missing_equation_number_gap"],
                 "recommended_review_mode": "candidate_numbering_review",
                 "recommended_review_reason": "missing_equation_number_gap",
@@ -3801,6 +3817,11 @@ class TestFormulaBackfill:
         assert evidence["source"] == "zotpilot_chroma_chunks"
         assert evidence["mode"] == "read_only_review_evidence"
         assert evidence["unmatched_reference_numbers"] == ["(3)"]
+        assert evidence["reference_match_status"] == "no_match"
+        assert evidence["review_flags"] == [
+            "semantic_unmatched_references",
+            "semantic_no_candidate_reference_overlap",
+        ]
         assert result["semantic_formula_evidence_paper_count"] == 1
         assert result["semantic_formula_unmatched_reference_paper_count"] == 1
         assert result["summary"]["semantic_formula_unmatched_reference_paper_count"] == 1
@@ -3818,6 +3839,11 @@ class TestFormulaBackfill:
             "semantic_evidence_unmatched_references"
         )
         assert blocking_row["semantic_formula_unmatched_reference_numbers"] == ["(3)"]
+        assert blocking_row["semantic_formula_reference_match_status"] == "no_match"
+        assert blocking_row["semantic_formula_review_flags"] == [
+            "semantic_unmatched_references",
+            "semantic_no_candidate_reference_overlap",
+        ]
         assert blocking_row["recommended_review"] == {
             "mode": "semantic_formula_evidence_review",
             "reason": "semantic_evidence_unmatched_equation_references",
@@ -3839,6 +3865,11 @@ class TestFormulaBackfill:
         assert result["formula_review_summary"][0]["priority"] == 10
         assert result["formula_review_summary"][0]["semantic_formula_unmatched_reference_numbers"] == [
             "(3)"
+        ]
+        assert result["formula_review_summary"][0]["semantic_formula_reference_match_status"] == "no_match"
+        assert result["formula_review_summary"][0]["semantic_formula_review_flags"] == [
+            "semantic_unmatched_references",
+            "semantic_no_candidate_reference_overlap",
         ]
         assert result["formula_review_summary"][0]["recommended_review_mode"] == (
             "semantic_formula_evidence_review"

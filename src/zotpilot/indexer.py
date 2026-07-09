@@ -1167,10 +1167,28 @@ def _formula_write_report_rows(results: list[dict[str, object]]) -> list[dict[st
             "existing_formulas_kept": row.get("existing_formulas_kept", 0),
             "review_reasons": row.get("review_reasons", []),
             "recommended_review_mode": "",
+            "semantic_evidence_count": row.get("semantic_formula_evidence_count", 0),
+            "semantic_evidence_without_reference_count": row.get(
+                "semantic_formula_evidence_without_reference_count",
+                0,
+            ),
+            "semantic_unmatched_reference_count": row.get(
+                "semantic_formula_unmatched_reference_count",
+                0,
+            ),
             "semantic_unmatched_reference_numbers": row.get(
                 "semantic_formula_unmatched_reference_numbers",
                 [],
             ),
+            "semantic_reference_match_status": row.get(
+                "semantic_formula_reference_match_status",
+                "",
+            ),
+            "semantic_reference_coverage_ratio": row.get(
+                "semantic_formula_reference_coverage_ratio",
+                0.0,
+            ),
+            "semantic_review_flags": row.get("semantic_formula_review_flags", []),
         }
         recommended_review = row.get("recommended_review")
         if isinstance(recommended_review, dict):
@@ -1446,6 +1464,66 @@ def _formula_semantic_evidence_review(
     }
 
 
+def _formula_semantic_evidence_paper_row(
+    *,
+    item_key: str,
+    title: str,
+    semantic_evidence: dict[str, object],
+) -> dict[str, object]:
+    """Return a compact semantic-evidence row for review dashboards."""
+    return {
+        "item_key": item_key,
+        "title": title,
+        "evidence_count": semantic_evidence.get("evidence_count", 0),
+        "formula_evidence_without_reference_count": semantic_evidence.get(
+            "formula_evidence_without_reference_count",
+            0,
+        ),
+        "unmatched_reference_count": semantic_evidence.get(
+            "unmatched_reference_count",
+            0,
+        ),
+        "unmatched_reference_numbers": semantic_evidence.get(
+            "unmatched_reference_numbers",
+            [],
+        ),
+        "reference_match_status": semantic_evidence.get("reference_match_status", ""),
+        "reference_coverage_ratio": semantic_evidence.get("reference_coverage_ratio", 0.0),
+        "review_flags": semantic_evidence.get("review_flags", []),
+        "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
+    }
+
+
+def _formula_semantic_evidence_result_fields(
+    semantic_evidence: dict[str, object],
+) -> dict[str, object]:
+    """Return prefixed semantic-evidence fields for per-paper result rows."""
+    return {
+        "semantic_formula_evidence_count": semantic_evidence.get("evidence_count", 0),
+        "semantic_formula_evidence_without_reference_count": semantic_evidence.get(
+            "formula_evidence_without_reference_count",
+            0,
+        ),
+        "semantic_formula_unmatched_reference_count": semantic_evidence.get(
+            "unmatched_reference_count",
+            0,
+        ),
+        "semantic_formula_unmatched_reference_numbers": semantic_evidence.get(
+            "unmatched_reference_numbers",
+            [],
+        ),
+        "semantic_formula_reference_match_status": semantic_evidence.get(
+            "reference_match_status",
+            "",
+        ),
+        "semantic_formula_reference_coverage_ratio": semantic_evidence.get(
+            "reference_coverage_ratio",
+            0.0,
+        ),
+        "semantic_formula_review_flags": semantic_evidence.get("review_flags", []),
+    }
+
+
 def _formula_candidate_quality_recommended_review(
     *,
     item_key: str,
@@ -1587,17 +1665,7 @@ def _formula_candidate_quality_blocking_row(
         ),
     }
     if semantic_evidence:
-        row.update({
-            "semantic_formula_evidence_count": semantic_evidence.get("evidence_count", 0),
-            "semantic_formula_unmatched_reference_count": semantic_evidence.get(
-                "unmatched_reference_count",
-                0,
-            ),
-            "semantic_formula_unmatched_reference_numbers": semantic_evidence.get(
-                "unmatched_reference_numbers",
-                [],
-            ),
-        })
+        row.update(_formula_semantic_evidence_result_fields(semantic_evidence))
     recommended_review = _formula_candidate_quality_recommended_review(
         item_key=item_key,
         review_reasons=review_reasons,
@@ -1735,6 +1803,20 @@ def _formula_review_summary_rows(
                 "semantic_formula_unmatched_reference_numbers",
                 [],
             ),
+            "semantic_formula_evidence_count": row.get("semantic_formula_evidence_count", 0),
+            "semantic_formula_evidence_without_reference_count": row.get(
+                "semantic_formula_evidence_without_reference_count",
+                0,
+            ),
+            "semantic_formula_reference_match_status": row.get(
+                "semantic_formula_reference_match_status",
+                "",
+            ),
+            "semantic_formula_reference_coverage_ratio": row.get(
+                "semantic_formula_reference_coverage_ratio",
+                0.0,
+            ),
+            "semantic_formula_review_flags": row.get("semantic_formula_review_flags", []),
             "equation_number_warnings": row.get("equation_number_warnings", []),
             "recommended_review_mode": recommended_mode,
             "recommended_review_reason": recommended_reason,
@@ -2372,20 +2454,13 @@ class Indexer:
             )
             if semantic_evidence:
                 if semantic_evidence.get("evidence_count"):
-                    semantic_formula_evidence_papers.append({
-                        "item_key": item.item_key,
-                        "title": item.title,
-                        "evidence_count": semantic_evidence.get("evidence_count", 0),
-                        "unmatched_reference_count": semantic_evidence.get(
-                            "unmatched_reference_count",
-                            0,
-                        ),
-                        "unmatched_reference_numbers": semantic_evidence.get(
-                            "unmatched_reference_numbers",
-                            [],
-                        ),
-                        "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
-                    })
+                    semantic_formula_evidence_papers.append(
+                        _formula_semantic_evidence_paper_row(
+                            item_key=item.item_key,
+                            title=item.title,
+                            semantic_evidence=semantic_evidence,
+                        )
+                    )
                 semantic_review_reason = _formula_semantic_evidence_review_reason(semantic_evidence)
                 if (
                     semantic_review_reason
@@ -2426,8 +2501,12 @@ class Indexer:
                     for key in (
                         "candidate_quality_severity",
                         "semantic_formula_evidence_count",
+                        "semantic_formula_evidence_without_reference_count",
                         "semantic_formula_unmatched_reference_count",
                         "semantic_formula_unmatched_reference_numbers",
+                        "semantic_formula_reference_match_status",
+                        "semantic_formula_reference_coverage_ratio",
+                        "semantic_formula_review_flags",
                     ):
                         if key in blocking_summary:
                             row[key] = blocking_summary[key]
@@ -3066,21 +3145,15 @@ class Indexer:
             )
             if semantic_evidence:
                 row["semantic_formula_evidence"] = semantic_evidence
+                row.update(_formula_semantic_evidence_result_fields(semantic_evidence))
                 if semantic_evidence.get("evidence_count"):
-                    semantic_formula_evidence_papers.append({
-                        "item_key": item.item_key,
-                        "title": item.title,
-                        "evidence_count": semantic_evidence.get("evidence_count", 0),
-                        "unmatched_reference_count": semantic_evidence.get(
-                            "unmatched_reference_count",
-                            0,
-                        ),
-                        "unmatched_reference_numbers": semantic_evidence.get(
-                            "unmatched_reference_numbers",
-                            [],
-                        ),
-                        "top_evidence": semantic_evidence.get("top_evidence", [])[:3],
-                    })
+                    semantic_formula_evidence_papers.append(
+                        _formula_semantic_evidence_paper_row(
+                            item_key=item.item_key,
+                            title=item.title,
+                            semantic_evidence=semantic_evidence,
+                        )
+                    )
                 semantic_review_reason = _formula_semantic_evidence_review_reason(semantic_evidence)
                 if (
                     semantic_review_reason
