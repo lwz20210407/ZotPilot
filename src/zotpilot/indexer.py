@@ -1081,6 +1081,40 @@ def _formula_write_next_action(
     return "Formula chunks were written; verify sampled formula search results before scaling up."
 
 
+def _formula_write_status_counts(results: list[dict[str, object]]) -> dict[str, int]:
+    """Count per-paper formula write statuses for batch review dashboards."""
+    return dict(sorted(Counter(str(row.get("status") or "unknown") for row in results).items()))
+
+
+def _formula_write_route_counts(results: list[dict[str, object]]) -> dict[str, int]:
+    """Group formula write statuses into production routing buckets."""
+    route_by_status = {
+        "indexed": "indexed",
+        "indexed_with_review": "indexed",
+        "needs_review": "review_queue",
+        "deferred_budget": "deferred",
+        "deferred_high_density": "deferred",
+        "stopped_quota": "deferred",
+        "skipped": "skipped",
+        "failed": "failed",
+        "no_formula": "no_formula",
+    }
+    counts = {
+        "indexed": 0,
+        "review_queue": 0,
+        "deferred": 0,
+        "skipped": 0,
+        "failed": 0,
+        "no_formula": 0,
+        "unknown": 0,
+    }
+    for row in results:
+        status = str(row.get("status") or "unknown")
+        route = route_by_status.get(status, "unknown")
+        counts[route] += 1
+    return counts
+
+
 def _formula_backfill_warnings(
     *,
     processed: int,
@@ -2597,6 +2631,8 @@ class Indexer:
             next_action = (
                 "Resolve unmatched requested item keys before treating this formula backfill batch as complete."
             )
+        status_counts = _formula_write_status_counts(results)
+        route_counts = _formula_write_route_counts(results)
         result = {
             "run_id": run_id,
             "provider": provider_name,
@@ -2609,6 +2645,8 @@ class Indexer:
             "unmatched_requested_item_keys": unmatched_requested_item_keys,
             "request_complete": request_complete,
             "formulas_indexed": formulas_indexed,
+            "formula_write_status_counts": status_counts,
+            "formula_write_route_counts": route_counts,
             "write_ready": write_ready,
             "write_blocked": write_blocked,
             "write_review_required": write_review_required,
@@ -2660,6 +2698,8 @@ class Indexer:
                 "unmatched_requested_item_keys": result["unmatched_requested_item_keys"],
                 "request_complete": result["request_complete"],
                 "formulas_indexed": result["formulas_indexed"],
+                "formula_write_status_counts": result["formula_write_status_counts"],
+                "formula_write_route_counts": result["formula_write_route_counts"],
                 "write_ready": result["write_ready"],
                 "write_blocked": result["write_blocked"],
                 "write_review_required": result["write_review_required"],

@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -326,9 +327,11 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
         "zotpilot.feature_extraction.formula_ocr.extract_formula_candidates",
         side_effect=extract_for_pdf,
     ):
+        state_path = tmp_path / "formula-status.jsonl"
         result = indexer.index_formulas(
             item_keys=["GOOD1", "GAP1", "SEM1"],
             refresh_existing=False,
+            status_jsonl=state_path,
         )
 
     rows_by_key = {row["item_key"]: row for row in result["results"]}
@@ -336,6 +339,16 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert result["formulas_indexed"] == 2
     assert result["write_blocked"] is True
     assert result["write_ready"] is False
+    assert result["formula_write_status_counts"] == {"indexed": 1, "needs_review": 2}
+    assert result["formula_write_route_counts"] == {
+        "indexed": 1,
+        "review_queue": 2,
+        "deferred": 0,
+        "skipped": 0,
+        "failed": 0,
+        "no_formula": 0,
+        "unknown": 0,
+    }
     assert result["candidate_quality_review_count"] == 2
     assert result["semantic_formula_unmatched_reference_paper_count"] == 1
     assert rows_by_key["GOOD1"]["status"] == "indexed"
@@ -355,3 +368,8 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     for item in (good, gap, semantic):
         for chunk_type, expected_ids in protected_ids[item.item_key].items():
             assert _chunk_ids_by_type(store, item.item_key, chunk_type) == expected_ids
+
+    events = [json.loads(line) for line in state_path.read_text().splitlines()]
+    assert events[-1]["event"] == "formula_backfill_run_finished"
+    assert events[-1]["formula_write_status_counts"] == result["formula_write_status_counts"]
+    assert events[-1]["formula_write_route_counts"] == result["formula_write_route_counts"]
