@@ -59,6 +59,7 @@ _DOI_OR_REFERENCE_RE = re.compile(
     r"(?:\bdoi\b|https?://|references\b|bibliography\b|^\s*\[[0-9]+\]|参考文献)",
     re.IGNORECASE,
 )
+_REFERENCE_LIST_CONNECTOR_RE = re.compile(r"(?:[-~～至到、,，;；和]|and|to)\s*$", re.IGNORECASE)
 
 
 def _looks_like_citation_year_number(value: str) -> bool:
@@ -68,6 +69,20 @@ def _looks_like_citation_year_number(value: str) -> bool:
         return False
     year = int(normalized)
     return 1800 <= year <= 2099
+
+
+def _looks_like_measurement_or_unit_number(value: str) -> bool:
+    """Return True for parenthetical values such as ``(7.62m)`` or ``(0.5)``."""
+    normalized = normalize_equation_number(value)
+    if re.fullmatch(r"\d+(?:[.-]\d+)+[a-z]", normalized):
+        return True
+    return bool(re.fullmatch(r"0[.-]\d+(?:[a-z])?", normalized))
+
+
+def _explicit_reference_continuation(prefix: str) -> bool:
+    """Return True when a parenthetical number continues an Eq./formula list."""
+    compact = prefix[-18:]
+    return bool(_REFERENCE_LIST_CONNECTOR_RE.search(compact))
 
 
 @dataclass(frozen=True)
@@ -100,6 +115,16 @@ def format_equation_number(value: str) -> str:
     return f"({normalized})" if normalized else ""
 
 
+def _equation_number_match_keys(value: str) -> set[str]:
+    """Return conservative aliases used only for matching evidence to candidates."""
+    normalized = normalize_equation_number(value)
+    keys = {normalized} if normalized else set()
+    match = re.fullmatch(r"([1-9])[-.](\d{1,2}[a-z]?)", normalized)
+    if match and not match.group(2).startswith("0"):
+        keys.add(f"{match.group(1)}{match.group(2)}")
+    return keys
+
+
 def extract_equation_references(text: str) -> list[str]:
     """Extract explicit equation references from text chunks.
 
@@ -114,6 +139,8 @@ def extract_equation_references(text: str) -> list[str]:
         number = normalize_equation_number(raw)
         if _looks_like_citation_year_number(number):
             return
+        if _looks_like_measurement_or_unit_number(number):
+            return
         if number and number not in seen:
             seen.add(number)
             numbers.append(format_equation_number(number))
@@ -121,9 +148,15 @@ def extract_equation_references(text: str) -> list[str]:
     for window_match in _EXPLICIT_REF_WINDOW_RE.finditer(normalized_text):
         window = window_match.group(0)
         window_numbers: list[tuple[int, str]] = []
+        explicit_positions: set[int] = set()
         for match in _EXPLICIT_MARKER_NUMBER_RE.finditer(window):
             window_numbers.append((match.start(1), match.group(1)))
+            explicit_positions.add(match.start(1))
         for match in _PAREN_NUMBER_RE.finditer(window):
+            if match.start(1) not in explicit_positions and not _explicit_reference_continuation(
+                window[: match.start()]
+            ):
+                continue
             window_numbers.append((match.start(1), match.group(1)))
         for _position, raw_number in sorted(window_numbers):
             add(raw_number)
@@ -233,6 +266,11 @@ def summarize_formula_semantic_evidence(
         for raw in candidate_equation_numbers
         if (number := normalize_equation_number(raw))
     }
+    candidate_match_numbers = {
+        match_key
+        for number in candidate_numbers
+        for match_key in _equation_number_match_keys(number)
+    }
     reference_numbers: list[str] = []
     seen_references: set[str] = set()
     for row in evidence:
@@ -245,12 +283,12 @@ def summarize_formula_semantic_evidence(
     unmatched = [
         format_equation_number(number)
         for number in seen_references
-        if number not in candidate_numbers
+        if number not in candidate_match_numbers
     ]
     matched = [
         format_equation_number(number)
         for number in seen_references
-        if number in candidate_numbers
+        if number in candidate_match_numbers
     ]
     return {
         "source": "zotpilot_chroma_chunks",

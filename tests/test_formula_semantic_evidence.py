@@ -21,6 +21,26 @@ def test_extract_equation_references_requires_explicit_marker_or_formula_tail():
     assert extract_equation_references("The term is formalized in Eq. 2 (Ref 35).") == ["(2)"]
 
 
+def test_extract_equation_references_ignores_non_equation_numbers_in_marker_window():
+    assert extract_equation_references("The projectile diameter is (7.62m) and velocity is (0.5) km/s.") == []
+    assert extract_equation_references("The projectile is defined by formula (3.2), diameter (7.62m).") == [
+        "(3.2)"
+    ]
+    assert extract_equation_references("代入式（4-8）即可得到 m 值，试样尺寸为 (0.5) mm。") == ["(4-8)"]
+    assert extract_equation_references("将拟合得到的系数代入公式（4-4），材料编号 (316) 不应视为公式。") == [
+        "(4-4)"
+    ]
+
+
+def test_extract_equation_references_keeps_connected_equation_lists():
+    assert extract_equation_references("式（4-9）、（4-10）、（4-11）给出更新过程。") == [
+        "(4-9)",
+        "(4-10)",
+        "(4-11)",
+    ]
+    assert extract_equation_references("The residual follows Eqs. (6) and (7).") == ["(6)", "(7)"]
+
+
 def test_formula_semantic_evidence_summary_flags_unmatched_references():
     chunks = [
         StoredChunk(
@@ -45,6 +65,27 @@ def test_formula_semantic_evidence_summary_flags_unmatched_references():
     assert summary["unmatched_reference_count"] == 1
     assert summary["top_evidence"][0]["chunk_id"] == "DOC1_chunk_0003"
     assert "not treated as verified formulas" in summary["review_note"]
+
+
+def test_formula_semantic_evidence_matches_collapsed_chapter_number_aliases():
+    chunks = [
+        StoredChunk(
+            id="DOC1_chunk_0005",
+            text="将拟合得到的系数代入式（49），可获得流变失稳判据。",
+            metadata={"chunk_type": "text", "page_num": 5, "chunk_index": 5, "section": "results"},
+        ),
+        StoredChunk(
+            id="DOC1_chunk_0006",
+            text="Luo 等建立了相变关系，如式（316）所示： beta = f(T)。",
+            metadata={"chunk_type": "text", "page_num": 6, "chunk_index": 6, "section": "results"},
+        ),
+    ]
+
+    summary = summarize_formula_semantic_evidence(chunks, candidate_equation_numbers=["(4-9)", "(3-16)"])
+
+    assert set(summary["equation_reference_numbers"]) == {"(49)", "(316)"}
+    assert set(summary["matched_reference_numbers"]) == {"(49)", "(316)"}
+    assert summary["unmatched_reference_numbers"] == []
 
 
 def test_formula_hint_and_score_prioritize_math_signal():
