@@ -26,6 +26,10 @@ _FULLWIDTH_TRANS = str.maketrans(
         "）": ")",
         "－": "-",
         "—": "-",
+        "–": "-",
+        "−": "-",
+        "‐": "-",
+        "\uf02d": "-",
         "＿": "_",
         "．": ".",
     }
@@ -43,19 +47,20 @@ _FORMULA_SIGNAL_RE = re.compile(
 
 _FORMULA_RELATION_RE = re.compile(r"(?:=|≤|≥|≈|∝|<|>|\\leq|\\geq|\\approx|\\sim)", re.IGNORECASE)
 _TEX_COMMAND_RE = re.compile(r"\\(?:frac|sum|int|sqrt|partial|dot|bar|tilde|hat|begin|end)\b")
-_CJK_EQUATION_MARKER = r"(?:公式|方程|(?<!方)(?<!形)(?<!模)(?<!格)(?<!样)(?<!范)式)"
+_CJK_EQUATION_MARKER = r"(?:公式|方程|(?<!方)(?<!形)(?<!模)(?<!格)(?<!样)(?<!范)式(?!中))"
 _EXPLICIT_REF_WINDOW_RE = re.compile(
     rf"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*[:：]?\s*.{{0,140}}",
     re.IGNORECASE,
 )
-_PAREN_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)", re.IGNORECASE)
+_EQUATION_NUMBER_PATTERN = r"[0-9]+(?:\s*[.\-_]\s*[0-9]+)*(?:[a-z])?"
+_PAREN_NUMBER_RE = re.compile(rf"\(\s*({_EQUATION_NUMBER_PATTERN})\s*\)", re.IGNORECASE)
 _EXPLICIT_MARKER_NUMBER_RE = re.compile(
     rf"(?P<marker>\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*"
     rf"(?P<open>[\(:：]\s*)?"
-    rf"(?P<number>[0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
+    rf"(?P<number>{_EQUATION_NUMBER_PATTERN})",
     re.IGNORECASE,
 )
-_TRAILING_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)\s*$", re.IGNORECASE)
+_TRAILING_NUMBER_RE = re.compile(rf"\(\s*({_EQUATION_NUMBER_PATTERN})\s*\)\s*$", re.IGNORECASE)
 _DOI_OR_REFERENCE_RE = re.compile(
     r"(?:\bdoi\b|https?://|references\b|bibliography\b|^\s*\[[0-9]+\]|参考文献)",
     re.IGNORECASE,
@@ -87,8 +92,16 @@ def _looks_like_measurement_or_unit_number(value: str) -> bool:
 
 def _explicit_reference_continuation(prefix: str) -> bool:
     """Return True when a parenthetical number continues an Eq./formula list."""
+    if _looks_like_heading_or_list_marker_prefix(prefix):
+        return False
     compact = prefix[-18:]
     return bool(_REFERENCE_LIST_CONNECTOR_RE.search(compact))
+
+
+def _looks_like_heading_or_list_marker_prefix(prefix: str) -> bool:
+    """Return True when a parenthetical number is preceded by a list/heading marker."""
+    line_prefix = re.split(r"[\r\n]", prefix[-80:])[-1]
+    return bool(re.fullmatch(r"\s*(?:#{1,6}|[-*+]|\d+[.)])\s*", line_prefix))
 
 
 def _looks_like_unparenthesized_line_number(raw: str, marker: str, has_grouping: bool) -> bool:

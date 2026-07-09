@@ -50,6 +50,30 @@ def test_extract_equation_references_keeps_connected_equation_lists():
     assert extract_equation_references("The residual follows Eqs. (6) and (7).") == ["(6)", "(7)"]
 
 
+def test_extract_equation_references_ignores_cjk_formula_notes_before_step_lists():
+    text = (
+        "等效塑性应变率\n\n"
+        "**==> picture [255 x 31] intentionally omitted <==**\n\n"
+        "式中，epsilon 为材料初始应变率，预定义 epsilon 为 0.0001。\n\n"
+        "- (2) 读取考虑应力三轴度的损伤子程序的材料常数以及状态输出变量；\n\n"
+        "- (3) 计算试探应力\n"
+    )
+
+    assert extract_equation_references(text) == []
+    assert extract_equation_references("如式（4-9）、（4-10）所示。") == ["(4-9)", "(4-10)"]
+    assert extract_equation_references("The residual follows Eqs. (6) and (7).") == ["(6)", "(7)"]
+
+
+def test_extract_equation_references_normalizes_pdf_private_use_minus_numbers():
+    text = (
+        "把试探应力偏张量代入式（2 \uf02d 23）中计算等效应力，"
+        "把等效塑性应变代入式（2 − 24）中计算流动应力，"
+        "再代入式（2 – 22）判断屈服。"
+    )
+
+    assert extract_equation_references(text) == ["(2-23)", "(2-24)", "(2-22)"]
+
+
 def test_formula_semantic_evidence_summary_flags_unmatched_references():
     chunks = [
         StoredChunk(
