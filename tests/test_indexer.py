@@ -3844,6 +3844,41 @@ class TestFormulaBackfill:
             "semantic_formula_evidence_review"
         )
 
+    def test_estimate_formula_backfill_reports_readonly_index_change(self, tmp_path):
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        class EvidenceStore:
+            def get_indexed_doc_ids(self) -> set[str]:
+                return {"DOC1"}
+
+            def get_formula_evidence_chunks(self, _item_key: str):
+                return []
+
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        item = ZoteroItem("DOC1", "Paper", "Auth", 2024, pdf_path)
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = EvidenceStore()
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer._assert_config_hash_current = MagicMock()
+        before = {"files": {"chroma.sqlite3": {"exists": True, "size": 10, "mtime_ns": 100}}}
+        after = {"files": {"chroma.sqlite3": {"exists": True, "size": 20, "mtime_ns": 200}}}
+
+        with (
+            patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=[]),
+            patch("zotpilot.indexer._readonly_index_snapshot", side_effect=[before, after]),
+        ):
+            result = indexer.estimate_formula_backfill(item_key="DOC1")
+
+        assert result["readonly_index_changed"] is True
+        assert result["summary"]["readonly_index_changed"] is True
+        assert result["readonly_index_snapshot_before"] == before
+        assert result["readonly_index_snapshot_after"] == after
+        assert any("changed during this read-only estimate" in warning for warning in result["summary"]["warnings"])
+
     def test_estimate_formula_backfill_preview_can_include_all_candidates_without_truncation(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer

@@ -165,6 +165,38 @@ class _ReadOnlyIndexedDocStore:
         )
 
 
+def _readonly_index_snapshot(db_path: Path | str | None) -> dict[str, object]:
+    """Return lightweight file metadata for the Chroma SQLite store."""
+    if db_path is None:
+        return {"files": {}}
+    sqlite_path = Path(db_path) / "chroma.sqlite3"
+    files: dict[str, dict[str, object]] = {}
+    for path in (
+        sqlite_path,
+        sqlite_path.with_name(f"{sqlite_path.name}-wal"),
+        sqlite_path.with_name(f"{sqlite_path.name}-shm"),
+    ):
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            files[path.name] = {"exists": False}
+            continue
+        files[path.name] = {
+            "exists": True,
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+    return {"files": files}
+
+
+def _readonly_index_snapshot_changed(
+    before: dict[str, object],
+    after: dict[str, object],
+) -> bool:
+    """Return true if the Chroma SQLite/WAL/SHM metadata changed."""
+    return before.get("files") != after.get("files")
+
+
 def _failure_signature(e: Exception) -> str:
     """Normalize volatile tokens so two same-cause failures compare equal.
 
@@ -1086,8 +1118,8 @@ def _formula_write_status_counts(results: list[dict[str, object]]) -> dict[str, 
     return dict(sorted(Counter(str(row.get("status") or "unknown") for row in results).items()))
 
 
-def _formula_write_route_counts(results: list[dict[str, object]]) -> dict[str, int]:
-    """Group formula write statuses into production routing buckets."""
+def _formula_write_route(status: str) -> str:
+    """Map a formula write status to a production routing bucket."""
     route_by_status = {
         "indexed": "indexed",
         "indexed_with_review": "indexed",
@@ -1099,6 +1131,11 @@ def _formula_write_route_counts(results: list[dict[str, object]]) -> dict[str, i
         "failed": "failed",
         "no_formula": "no_formula",
     }
+    return route_by_status.get(status, "unknown")
+
+
+def _formula_write_route_counts(results: list[dict[str, object]]) -> dict[str, int]:
+    """Group formula write statuses into production routing buckets."""
     counts = {
         "indexed": 0,
         "review_queue": 0,
@@ -1110,9 +1147,36 @@ def _formula_write_route_counts(results: list[dict[str, object]]) -> dict[str, i
     }
     for row in results:
         status = str(row.get("status") or "unknown")
-        route = route_by_status.get(status, "unknown")
-        counts[route] += 1
+        counts[_formula_write_route(status)] += 1
     return counts
+
+
+def _formula_write_report_rows(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Return compact per-paper rows for formula write acceptance review."""
+    report_rows: list[dict[str, object]] = []
+    for row in results:
+        status = str(row.get("status") or "unknown")
+        report_row = {
+            "item_key": row.get("item_key", ""),
+            "title": row.get("title", ""),
+            "route": _formula_write_route(status),
+            "status": status,
+            "reason": row.get("reason", ""),
+            "candidate_count": row.get("candidate_count", 0),
+            "n_formulas": row.get("n_formulas", 0),
+            "existing_formulas_kept": row.get("existing_formulas_kept", 0),
+            "review_reasons": row.get("review_reasons", []),
+            "recommended_review_mode": "",
+            "semantic_unmatched_reference_numbers": row.get(
+                "semantic_formula_unmatched_reference_numbers",
+                [],
+            ),
+        }
+        recommended_review = row.get("recommended_review")
+        if isinstance(recommended_review, dict):
+            report_row["recommended_review_mode"] = recommended_review.get("mode", "")
+        report_rows.append(report_row)
+    return report_rows
 
 
 def _formula_backfill_warnings(
@@ -2633,6 +2697,7 @@ class Indexer:
             )
         status_counts = _formula_write_status_counts(results)
         route_counts = _formula_write_route_counts(results)
+        write_report = _formula_write_report_rows(results)
         result = {
             "run_id": run_id,
             "provider": provider_name,
@@ -2647,6 +2712,7 @@ class Indexer:
             "formulas_indexed": formulas_indexed,
             "formula_write_status_counts": status_counts,
             "formula_write_route_counts": route_counts,
+            "formula_write_report": write_report,
             "write_ready": write_ready,
             "write_blocked": write_blocked,
             "write_review_required": write_review_required,
@@ -2700,6 +2766,7 @@ class Indexer:
                 "formulas_indexed": result["formulas_indexed"],
                 "formula_write_status_counts": result["formula_write_status_counts"],
                 "formula_write_route_counts": result["formula_write_route_counts"],
+                "formula_write_report": result["formula_write_report"],
                 "write_ready": result["write_ready"],
                 "write_blocked": result["write_blocked"],
                 "write_review_required": result["write_review_required"],
@@ -2752,6 +2819,9 @@ class Indexer:
     ) -> dict:
         """Estimate formula OCR candidate volume without OCR calls or index writes."""
         self._assert_config_hash_current()
+        readonly_index_before = _readonly_index_snapshot(
+            getattr(self.config, "chroma_db_path", None)
+        )
         from .feature_extraction.formula_ocr import count_formula_provider_calls
 
         page_min, page_max = _validate_formula_page_range(page_min, page_max)
@@ -3110,6 +3180,18 @@ class Indexer:
             data_egress=has_external_egress,
             daily_call_budget=budget,
         )
+        readonly_index_after = _readonly_index_snapshot(
+            getattr(self.config, "chroma_db_path", None)
+        )
+        readonly_index_changed = _readonly_index_snapshot_changed(
+            readonly_index_before,
+            readonly_index_after,
+        )
+        if readonly_index_changed:
+            warnings.append(
+                "The Chroma SQLite index changed during this read-only estimate; discard this "
+                "batch as validation evidence and check for concurrent ZotPilot index writers."
+            )
         if not resume_after_found:
             warnings.append(
                 f"resume_after item_key {resume_after!r} was not found in the matched backfill set."
@@ -3275,6 +3357,7 @@ class Indexer:
             "sample_excluded_requested_key_count": len(sample_excluded_keys),
             "sample_excluded_indexed_key_count": sample_excluded_indexed_key_count,
             "sampled_from": sampled_from,
+            "readonly_index_changed": readonly_index_changed,
             "warnings": warnings,
             "next_action": next_action,
         }
@@ -3341,6 +3424,9 @@ class Indexer:
             "sample_excluded_indexed_key_count": sample_excluded_indexed_key_count,
             "sampled_from": sampled_from,
             "sampled_unresolved_key_count": sampled_unresolved_key_count,
+            "readonly_index_changed": readonly_index_changed,
+            "readonly_index_snapshot_before": readonly_index_before,
+            "readonly_index_snapshot_after": readonly_index_after,
             "data_egress": has_external_egress,
             "summary": summary,
             "results": results,

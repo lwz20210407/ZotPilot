@@ -349,6 +349,16 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
         "no_formula": 0,
         "unknown": 0,
     }
+    report_by_key = {row["item_key"]: row for row in result["formula_write_report"]}
+    assert report_by_key["GOOD1"]["route"] == "indexed"
+    assert report_by_key["GOOD1"]["status"] == "indexed"
+    assert report_by_key["GOOD1"]["n_formulas"] == 2
+    assert report_by_key["GAP1"]["route"] == "review_queue"
+    assert report_by_key["GAP1"]["recommended_review_mode"] == "candidate_numbering_review"
+    assert report_by_key["GAP1"]["review_reasons"] == ["missing_equation_number_gap"]
+    assert report_by_key["SEM1"]["route"] == "review_queue"
+    assert report_by_key["SEM1"]["recommended_review_mode"] == "semantic_formula_evidence_review"
+    assert report_by_key["SEM1"]["semantic_unmatched_reference_numbers"] == ["(3)"]
     assert result["candidate_quality_review_count"] == 2
     assert result["semantic_formula_unmatched_reference_paper_count"] == 1
     assert rows_by_key["GOOD1"]["status"] == "indexed"
@@ -373,3 +383,4 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert events[-1]["event"] == "formula_backfill_run_finished"
     assert events[-1]["formula_write_status_counts"] == result["formula_write_status_counts"]
     assert events[-1]["formula_write_route_counts"] == result["formula_write_route_counts"]
+    assert events[-1]["formula_write_report"] == result["formula_write_report"]
