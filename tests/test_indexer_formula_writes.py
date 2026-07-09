@@ -9,6 +9,7 @@ from zotpilot.models import (
     ExtractedFigure,
     ExtractedFormula,
     ExtractedTable,
+    PageExtraction,
     ZoteroItem,
 )
 from zotpilot.vector_store import VectorStore
@@ -535,3 +536,89 @@ def test_index_formulas_blocks_scaling_when_non_formula_scope_counts_change(
     assert result["write_ready"] is False
     assert result["write_block_reasons"] == ["formula_scope_non_formula_chunk_changed"]
     assert "text/table/figure chunk counts changed" in result["next_action"]
+
+
+def test_index_extraction_audits_inline_formula_stage_scope(
+    tmp_path,
+    mock_embedder,
+):
+    from zotpilot.index_authority import IndexJournal
+
+    doc_id = "INLINE1"
+    item = _indexed_item(tmp_path, doc_id)
+    config = _formula_config(tmp_path / "chroma")
+    store = VectorStore(config.chroma_db_path, mock_embedder)
+    chunk = Chunk(
+        text="Body text with Eq. (1)",
+        chunk_index=0,
+        page_num=1,
+        char_start=0,
+        char_end=22,
+        section="body",
+    )
+    candidate = FormulaCandidate(
+        page_num=1,
+        bbox=(0, 0, 10, 10),
+        raw_text=r"E = mc^2",
+        confidence=0.95,
+        source="mineru_content_list",
+        latex=r"E = mc^2",
+        equation_number="(1)",
+    )
+    formula = _formula(0, "(1)", r"E = mc^2", "mineru-cache")
+    extraction = SimpleNamespace(
+        pages=[PageExtraction(page_num=1, markdown=chunk.text, char_start=0)],
+        full_markdown=chunk.text,
+        sections=[],
+        tables=[],
+        figures=[],
+        stats={"text_pages": 1, "ocr_pages": 0, "empty_pages": 0},
+        quality_grade="A",
+        formulas=[],
+    )
+    indexer = Indexer.__new__(Indexer)
+    indexer.config = config
+    indexer.chunker = MagicMock()
+    indexer.chunker.chunk.return_value = [chunk]
+    indexer.journal_ranker = MagicMock()
+    indexer.journal_ranker.lookup.return_value = "Q1"
+    indexer.store = store
+    indexer._pdf_hash = MagicMock(return_value="pdf-hash")
+    indexer._extract_formula_candidates_for_item = MagicMock(return_value=[candidate])
+    indexer._recognize_formulas_for_item = MagicMock(return_value=[formula])
+
+    n_chunks, n_tables, reason, stats, quality = indexer._index_extraction(
+        item,
+        extraction,
+        IndexJournal(tmp_path / "journal.json"),
+    )
+
+    assert n_chunks == 1
+    assert n_tables == 0
+    assert reason == ""
+    assert quality == "A"
+    assert stats["n_formulas"] == 1
+    assert stats["formula_index_status"] == "indexed"
+    assert stats["formula_scope_chunk_type_counts_before"] == {
+        "text": 1,
+        "table": 0,
+        "figure": 0,
+        "formula": 0,
+    }
+    assert stats["formula_scope_chunk_type_counts_after"] == {
+        "text": 1,
+        "table": 0,
+        "figure": 0,
+        "formula": 1,
+    }
+    assert stats["formula_scope_chunk_type_count_delta"] == {
+        "text": 0,
+        "table": 0,
+        "figure": 0,
+        "formula": 1,
+    }
+    assert stats["formula_scope_non_formula_chunk_change"] is False
+    assert stats["formula_scope_non_formula_chunk_deltas"] == {}
+    assert store.count_chunk_types_by_doc({doc_id}) == {
+        doc_id: {"text": 1, "table": 0, "figure": 0, "formula": 1}
+    }

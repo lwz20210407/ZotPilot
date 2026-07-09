@@ -5368,6 +5368,11 @@ class Indexer:
         formula_index_status = "disabled"
         formula_index_reason = ""
         formula_index_review_reasons: list[str] = []
+        formula_scope_chunk_type_counts_before: dict[str, int] = {}
+        formula_scope_chunk_type_counts_after: dict[str, int] = {}
+        formula_scope_chunk_type_count_delta: dict[str, int] = {}
+        formula_scope_non_formula_chunk_change = False
+        formula_scope_non_formula_chunk_deltas: dict[str, int] = {}
 
         # Store formulas if explicitly enabled. Phase A only covers text-layer
         # candidates; image/vector formulas are intentionally left for later.
@@ -5431,9 +5436,38 @@ class Indexer:
                         ", ".join(blocking_review_reasons),
                     )
                 elif formulas:
+                    formula_scope_counts_before_by_doc = _count_formula_scope_chunk_types_by_doc(
+                        self.store,
+                        [item_key],
+                    )
+                    formula_scope_chunk_type_counts_before = (
+                        formula_scope_counts_before_by_doc.get(item_key, {})
+                    )
                     self.store.add_formulas(item_key, doc_meta, formulas)
+                    formula_scope_counts_after_by_doc = _count_formula_scope_chunk_types_by_doc(
+                        self.store,
+                        [item_key],
+                    )
+                    formula_scope_chunk_type_counts_after = (
+                        formula_scope_counts_after_by_doc.get(item_key, {})
+                    )
+                    formula_scope_chunk_type_count_delta = _chunk_type_count_delta(
+                        formula_scope_chunk_type_counts_before,
+                        formula_scope_chunk_type_counts_after,
+                    )
+                    formula_scope_non_formula_chunk_deltas = _non_formula_chunk_type_deltas(
+                        formula_scope_chunk_type_count_delta
+                    )
+                    formula_scope_non_formula_chunk_change = bool(
+                        formula_scope_non_formula_chunk_deltas
+                    )
                     n_formulas = len(formulas)
-                    formula_index_status = "indexed"
+                    if formula_scope_non_formula_chunk_change:
+                        formula_failure_this_run = True
+                        formula_index_status = "failed_scope_violation"
+                        formula_index_reason = "formula_scope_non_formula_chunk_changed"
+                    else:
+                        formula_index_status = "indexed"
                     logger.debug(f"  Extracted {n_formulas} formulas")
                 else:
                     formula_index_status = "no_formula"
@@ -5499,6 +5533,11 @@ class Indexer:
             "formula_index_status": formula_index_status,
             "formula_index_reason": formula_index_reason,
             "formula_index_review_reasons": formula_index_review_reasons,
+            "formula_scope_chunk_type_counts_before": formula_scope_chunk_type_counts_before,
+            "formula_scope_chunk_type_counts_after": formula_scope_chunk_type_counts_after,
+            "formula_scope_chunk_type_count_delta": formula_scope_chunk_type_count_delta,
+            "formula_scope_non_formula_chunk_change": formula_scope_non_formula_chunk_change,
+            "formula_scope_non_formula_chunk_deltas": formula_scope_non_formula_chunk_deltas,
         })
         logger.debug(f"Indexed {item.item_key}: {len(chunks)} chunks, {n_tables} tables, {n_figures} figures, {n_formulas} formulas, quality {quality_grade}")  # noqa: E501
         return len(chunks), n_tables, "", extraction_stats, quality_grade
