@@ -5405,6 +5405,74 @@ class TestSkipTracking:
         assert paper_finished["formula_scope_non_formula_chunk_change"] is True
         assert paper_finished["formula_scope_non_formula_chunk_deltas"] == {"text": -1}
 
+    def test_index_all_surfaces_inline_formula_review_reasons(self, tmp_path):
+        item = self._make_item("K1", "Paper A", has_pdf=True)
+        indexer = self._make_indexer([item])
+        self._patch_indexer(indexer)
+        indexer.store.db_path = tmp_path / "chroma"
+        indexer.store.get_indexed_doc_ids.return_value = set()
+        events: list[tuple[str, dict[str, object]]] = []
+
+        class RecordingSink:
+            def emit(self, event_type: str, **payload: object) -> None:
+                events.append((event_type, payload))
+
+        mock_extraction = MagicMock()
+        mock_extraction.pages = [MagicMock()]
+        mock_extraction.stats = {"total_pages": 1, "text_pages": 1, "ocr_pages": 0, "empty_pages": 0}
+        mock_extraction.quality_grade = "A"
+        mock_extraction.pending_vision = None
+        review_reasons = [
+            "semantic_evidence_unmatched_equation_references",
+            "missing_equation_number_gap",
+        ]
+        extraction_stats = {
+            "total_pages": 1,
+            "text_pages": 1,
+            "ocr_pages": 0,
+            "empty_pages": 0,
+            "n_formulas": 0,
+            "formula_index_status": "skipped_candidate_review",
+            "formula_index_reason": "candidate_quality_review_required",
+            "formula_index_review_reasons": review_reasons,
+        }
+
+        with patch("zotpilot.indexer.extract_document", return_value=mock_extraction), \
+             patch.object(
+                 indexer,
+                 "_index_extraction_with_retry",
+                 return_value=(1, 0, "", extraction_stats, "A"),
+             ):
+            result = indexer.index_all(batch_size=None, progress_sink=RecordingSink())
+
+        assert result["indexed"] == 1
+        assert result["formulas_indexed"] == 0
+        assert result["formula_status_counts"] == {"skipped_candidate_review": 1}
+        assert result["formula_review_reason_counts"] == {
+            "missing_equation_number_gap": 1,
+            "semantic_evidence_unmatched_equation_references": 1,
+        }
+        assert result["formula_review_required_count"] == 1
+        assert result["formula_review_required_items"] == [
+            {
+                "item_key": "K1",
+                "title": "Paper A",
+                "formula_status": "skipped_candidate_review",
+                "formula_reason": "candidate_quality_review_required",
+                "review_reasons": review_reasons,
+            }
+        ]
+        paper_finished = [
+            payload
+            for event_type, payload in events
+            if (
+                event_type == "paper_finished"
+                and payload.get("phase") == "indexing"
+                and payload.get("item_key") == "K1"
+            )
+        ][0]
+        assert paper_finished["formula_review_reasons"] == review_reasons
+
     def test_doc_deleted_during_run_is_removed_by_final_reconciliation(self, tmp_path):
         from unittest.mock import MagicMock, patch
 

@@ -2445,6 +2445,7 @@ class IndexResult:
     n_formulas: int = 0
     formula_status: str = ""
     formula_reason: str = ""
+    formula_review_reasons: list[str] = dataclass_field(default_factory=list)
     formula_scope_non_formula_chunk_change: bool = False
     formula_scope_non_formula_chunk_deltas: dict[str, int] = dataclass_field(default_factory=dict)
     quality_grade: str = ""  # A/B/C/D/F quality grade per document
@@ -4946,6 +4947,15 @@ class Indexer:
                 n_formulas = n_formulas if isinstance(n_formulas, int) else 0
                 formula_status = str(extraction_stats.get("formula_index_status", "") or "")
                 formula_reason = str(extraction_stats.get("formula_index_reason", "") or "")
+                raw_formula_review_reasons = extraction_stats.get(
+                    "formula_index_review_reasons",
+                    [],
+                )
+                formula_review_reasons = (
+                    [str(reason) for reason in raw_formula_review_reasons]
+                    if isinstance(raw_formula_review_reasons, list | tuple)
+                    else []
+                )
                 formula_scope_non_formula_chunk_change = bool(
                     extraction_stats.get("formula_scope_non_formula_chunk_change", False)
                 )
@@ -4966,6 +4976,7 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_review_reasons=formula_review_reasons,
                         formula_scope_non_formula_chunk_change=(
                             formula_scope_non_formula_chunk_change
                         ),
@@ -4986,6 +4997,7 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_review_reasons=formula_review_reasons,
                         formula_scope_non_formula_chunk_change=(
                             formula_scope_non_formula_chunk_change
                         ),
@@ -5001,6 +5013,7 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_review_reasons=formula_review_reasons,
                         formula_scope_non_formula_chunk_change=(
                             formula_scope_non_formula_chunk_change
                         ),
@@ -5022,6 +5035,7 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_review_reasons=formula_review_reasons,
                         formula_scope_non_formula_chunk_change=(
                             formula_scope_non_formula_chunk_change
                         ),
@@ -5161,6 +5175,25 @@ class Indexer:
                 for r in results
                 if r.formula_status
             )),
+            "formula_review_reason_counts": dict(Counter(
+                reason
+                for r in results
+                for reason in r.formula_review_reasons
+            )),
+            "formula_review_required_count": sum(
+                1 for r in results if r.formula_review_reasons
+            ),
+            "formula_review_required_items": [
+                {
+                    "item_key": r.item_key,
+                    "title": r.title,
+                    "formula_status": r.formula_status,
+                    "formula_reason": r.formula_reason,
+                    "review_reasons": r.formula_review_reasons,
+                }
+                for r in results
+                if r.formula_review_reasons
+            ],
             "formula_scope_violation_count": sum(
                 1 for r in results if r.formula_scope_non_formula_chunk_change
             ),
