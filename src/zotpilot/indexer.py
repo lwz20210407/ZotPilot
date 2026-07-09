@@ -1466,6 +1466,35 @@ def _formula_semantic_missing_candidate_repair(
     }
 
 
+def _formula_semantic_gap_manual_review(
+    *,
+    item_key: str,
+    reason: str,
+) -> dict[str, object]:
+    """Build a read-only hint after automatic semantic-gap repair was tried."""
+    return {
+        "mode": "semantic_gap_manual_review",
+        "reason": reason,
+        "item_key": item_key,
+        "cli_args": [
+            "estimate-formula-backfill",
+            "--item-key",
+            item_key,
+            "--cache-pdf-number-enrichment",
+            "--preview-all-candidates",
+            "--json",
+        ],
+        "opens_pdf": True,
+        "writes_index": False,
+        "uses_external_ocr": False,
+        "evidence_source": "zotpilot_chroma_chunks",
+        "repair_attempted": True,
+        "manual_review_reason": (
+            "semantic references remain unmatched after append-missing PDF numbered candidates"
+        ),
+    }
+
+
 def _formula_semantic_evidence_paper_row(
     *,
     item_key: str,
@@ -1530,6 +1559,7 @@ def _formula_candidate_quality_recommended_review(
     *,
     item_key: str,
     review_reasons: list[str],
+    missing_candidate_repair_attempted: bool = False,
 ) -> dict[str, object] | None:
     """Return the safest read-only review action for candidate-stage blockers."""
     if "text_layer_high_density_requires_structured_cache" in review_reasons:
@@ -1548,6 +1578,11 @@ def _formula_candidate_quality_recommended_review(
             reason="cached_latex_low_quality",
         )
     if _SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES in review_reasons:
+        if missing_candidate_repair_attempted:
+            return _formula_semantic_gap_manual_review(
+                item_key=item_key,
+                reason=_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES,
+            )
         return _formula_semantic_missing_candidate_repair(
             item_key=item_key,
             reason=_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES,
@@ -1615,6 +1650,7 @@ def _formula_candidate_quality_blocking_row(
     candidate_audit: dict[str, object],
     review_reasons: list[str],
     semantic_evidence: dict[str, object] | None = None,
+    missing_candidate_repair_attempted: bool = False,
 ) -> dict[str, object]:
     """Build the read-only estimate row for papers that should not be written yet."""
     severity = _formula_candidate_quality_severity(
@@ -1671,6 +1707,7 @@ def _formula_candidate_quality_blocking_row(
     recommended_review = _formula_candidate_quality_recommended_review(
         item_key=item_key,
         review_reasons=review_reasons,
+        missing_candidate_repair_attempted=missing_candidate_repair_attempted,
     )
     if recommended_review is not None:
         row["recommended_review"] = recommended_review
@@ -2313,6 +2350,13 @@ class Indexer:
         low_confidence_review_queue: list[dict[str, object]] = []
         candidate_quality_review_queue: list[dict[str, object]] = []
         semantic_formula_evidence_papers: list[dict[str, object]] = []
+        missing_candidate_repair_attempted = bool(
+            getattr(
+                self.config,
+                "formula_candidate_pdf_number_append_missing_candidates",
+                False,
+            )
+        )
         provider_calls_used = 0
         external_calls_used = 0
         stopped_reason = ""
@@ -2499,6 +2543,7 @@ class Indexer:
                         candidate_audit=candidate_audit,
                         review_reasons=candidate_review_reasons,
                         semantic_evidence=semantic_evidence,
+                        missing_candidate_repair_attempted=missing_candidate_repair_attempted,
                     )
                     for key in (
                         "candidate_quality_severity",
@@ -2515,6 +2560,7 @@ class Indexer:
                 recommended_review = _formula_candidate_quality_recommended_review(
                     item_key=item.item_key,
                     review_reasons=candidate_review_reasons,
+                    missing_candidate_repair_attempted=missing_candidate_repair_attempted,
                 )
                 if recommended_review is not None:
                     row["recommended_review"] = recommended_review
@@ -3031,6 +3077,13 @@ class Indexer:
         cached_latex_missing_number_papers: list[dict[str, object]] = []
         candidate_quality_blocking_papers: list[dict[str, object]] = []
         semantic_formula_evidence_papers: list[dict[str, object]] = []
+        missing_candidate_repair_attempted = bool(
+            getattr(
+                self.config,
+                "formula_candidate_pdf_number_append_missing_candidates",
+                False,
+            )
+        )
         batch_candidate_scan_limit = (
             high_density_candidate_threshold + 1
             if (
@@ -3173,6 +3226,7 @@ class Indexer:
                         candidate_audit=candidate_audit,
                         review_reasons=candidate_quality_review_reasons,
                         semantic_evidence=semantic_evidence,
+                        missing_candidate_repair_attempted=missing_candidate_repair_attempted,
                     )
                 )
             if is_deferred_high_density:

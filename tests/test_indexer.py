@@ -9,6 +9,28 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def test_semantic_gap_review_switches_after_missing_candidate_repair_attempt():
+    from zotpilot.indexer import _formula_candidate_quality_recommended_review
+
+    first_review = _formula_candidate_quality_recommended_review(
+        item_key="DOC1",
+        review_reasons=["semantic_evidence_unmatched_equation_references"],
+    )
+    after_repair_attempt = _formula_candidate_quality_recommended_review(
+        item_key="DOC1",
+        review_reasons=["semantic_evidence_unmatched_equation_references"],
+        missing_candidate_repair_attempted=True,
+    )
+
+    assert first_review is not None
+    assert first_review["mode"] == "semantic_missing_candidate_repair"
+    assert "--append-missing-pdf-number-candidates" in first_review["cli_args"]
+    assert after_repair_attempt is not None
+    assert after_repair_attempt["mode"] == "semantic_gap_manual_review"
+    assert "--append-missing-pdf-number-candidates" not in after_repair_attempt["cli_args"]
+    assert after_repair_attempt["repair_attempted"] is True
+
+
 @dataclass
 class _HashCfg:
     """Minimal real dataclass carrying every field _config_hash reads.
