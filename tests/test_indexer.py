@@ -5343,6 +5343,68 @@ class TestSkipTracking:
         assert result["indexed"] == 1
         indexer.store.delete_document.assert_called_once_with("K2")
 
+    def test_index_all_surfaces_inline_formula_scope_violations(self, tmp_path):
+        item = self._make_item("K1", "Paper A", has_pdf=True)
+        indexer = self._make_indexer([item])
+        self._patch_indexer(indexer)
+        indexer.store.db_path = tmp_path / "chroma"
+        indexer.store.get_indexed_doc_ids.return_value = set()
+        events: list[tuple[str, dict[str, object]]] = []
+
+        class RecordingSink:
+            def emit(self, event_type: str, **payload: object) -> None:
+                events.append((event_type, payload))
+
+        mock_extraction = MagicMock()
+        mock_extraction.pages = [MagicMock()]
+        mock_extraction.stats = {"total_pages": 1, "text_pages": 1, "ocr_pages": 0, "empty_pages": 0}
+        mock_extraction.quality_grade = "A"
+        mock_extraction.pending_vision = None
+        extraction_stats = {
+            "total_pages": 1,
+            "text_pages": 1,
+            "ocr_pages": 0,
+            "empty_pages": 0,
+            "n_formulas": 1,
+            "formula_index_status": "failed_scope_violation",
+            "formula_index_reason": "formula_scope_non_formula_chunk_changed",
+            "formula_scope_non_formula_chunk_change": True,
+            "formula_scope_non_formula_chunk_deltas": {"text": -1},
+        }
+
+        with patch("zotpilot.indexer.extract_document", return_value=mock_extraction), \
+             patch.object(
+                 indexer,
+                 "_index_extraction_with_retry",
+                 return_value=(1, 0, "", extraction_stats, "A"),
+             ):
+            result = indexer.index_all(batch_size=None, progress_sink=RecordingSink())
+
+        assert result["indexed"] == 1
+        assert result["formulas_indexed"] == 1
+        assert result["formula_status_counts"] == {"failed_scope_violation": 1}
+        assert result["formula_scope_violation_count"] == 1
+        assert result["formula_scope_violation_items"] == [
+            {
+                "item_key": "K1",
+                "title": "Paper A",
+                "formula_status": "failed_scope_violation",
+                "formula_reason": "formula_scope_non_formula_chunk_changed",
+                "non_formula_chunk_deltas": {"text": -1},
+            }
+        ]
+        paper_finished = [
+            payload
+            for event_type, payload in events
+            if (
+                event_type == "paper_finished"
+                and payload.get("phase") == "indexing"
+                and payload.get("item_key") == "K1"
+            )
+        ][0]
+        assert paper_finished["formula_scope_non_formula_chunk_change"] is True
+        assert paper_finished["formula_scope_non_formula_chunk_deltas"] == {"text": -1}
+
     def test_doc_deleted_during_run_is_removed_by_final_reconciliation(self, tmp_path):
         from unittest.mock import MagicMock, patch
 

@@ -11,6 +11,7 @@ import time
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from pathlib import Path
 
 from tqdm import tqdm
@@ -2444,6 +2445,8 @@ class IndexResult:
     n_formulas: int = 0
     formula_status: str = ""
     formula_reason: str = ""
+    formula_scope_non_formula_chunk_change: bool = False
+    formula_scope_non_formula_chunk_deltas: dict[str, int] = dataclass_field(default_factory=dict)
     quality_grade: str = ""  # A/B/C/D/F quality grade per document
 
 
@@ -4943,6 +4946,18 @@ class Indexer:
                 n_formulas = n_formulas if isinstance(n_formulas, int) else 0
                 formula_status = str(extraction_stats.get("formula_index_status", "") or "")
                 formula_reason = str(extraction_stats.get("formula_index_reason", "") or "")
+                formula_scope_non_formula_chunk_change = bool(
+                    extraction_stats.get("formula_scope_non_formula_chunk_change", False)
+                )
+                raw_formula_scope_deltas = extraction_stats.get(
+                    "formula_scope_non_formula_chunk_deltas",
+                    {},
+                )
+                formula_scope_non_formula_chunk_deltas = (
+                    raw_formula_scope_deltas
+                    if isinstance(raw_formula_scope_deltas, dict)
+                    else {}
+                )
 
                 if n_chunks > 0:
                     results.append(IndexResult(
@@ -4951,6 +4966,12 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_scope_non_formula_chunk_change=(
+                            formula_scope_non_formula_chunk_change
+                        ),
+                        formula_scope_non_formula_chunk_deltas=(
+                            formula_scope_non_formula_chunk_deltas
+                        ),
                         quality_grade=quality_grade))
                     progress(
                         "paper_finished",
@@ -4965,6 +4986,12 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_scope_non_formula_chunk_change=(
+                            formula_scope_non_formula_chunk_change
+                        ),
+                        formula_scope_non_formula_chunk_deltas=(
+                            formula_scope_non_formula_chunk_deltas
+                        ),
                         quality_grade=quality_grade,
                     )
                 else:
@@ -4974,6 +5001,12 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_scope_non_formula_chunk_change=(
+                            formula_scope_non_formula_chunk_change
+                        ),
+                        formula_scope_non_formula_chunk_deltas=(
+                            formula_scope_non_formula_chunk_deltas
+                        ),
                         quality_grade=quality_grade))
                     progress(
                         "paper_finished",
@@ -4989,6 +5022,12 @@ class Indexer:
                         n_formulas=n_formulas,
                         formula_status=formula_status,
                         formula_reason=formula_reason,
+                        formula_scope_non_formula_chunk_change=(
+                            formula_scope_non_formula_chunk_change
+                        ),
+                        formula_scope_non_formula_chunk_deltas=(
+                            formula_scope_non_formula_chunk_deltas
+                        ),
                         quality_grade=quality_grade,
                     )
                 logger.debug(f"Completed {item.item_key}: {n_chunks} chunks, {n_tables} tables, quality {quality_grade}")  # noqa: E501
@@ -5122,6 +5161,20 @@ class Indexer:
                 for r in results
                 if r.formula_status
             )),
+            "formula_scope_violation_count": sum(
+                1 for r in results if r.formula_scope_non_formula_chunk_change
+            ),
+            "formula_scope_violation_items": [
+                {
+                    "item_key": r.item_key,
+                    "title": r.title,
+                    "formula_status": r.formula_status,
+                    "formula_reason": r.formula_reason,
+                    "non_formula_chunk_deltas": r.formula_scope_non_formula_chunk_deltas,
+                }
+                for r in results
+                if r.formula_scope_non_formula_chunk_change
+            ],
             "quality_distribution": quality_distribution,
             "extraction_stats": aggregated_extraction_stats,
         }
