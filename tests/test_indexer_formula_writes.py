@@ -235,6 +235,8 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
         "figure": 0,
         "formula": 2,
     }
+    assert first["formula_scope_non_formula_chunk_change"] is False
+    assert first["formula_scope_non_formula_chunk_deltas"] == {}
     assert store.count_chunk_types({doc_id}) == {
         "text": 3,
         "table": 1,
@@ -283,6 +285,8 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
         "figure": 0,
         "formula": -1,
     }
+    assert second["formula_scope_non_formula_chunk_change"] is False
+    assert second["formula_scope_non_formula_chunk_deltas"] == {}
     assert store.count_chunk_types({doc_id}) == {
         "text": 3,
         "table": 1,
@@ -439,3 +443,51 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert events[-1]["formula_scope_chunk_type_count_delta"] == result[
         "formula_scope_chunk_type_count_delta"
     ]
+    assert events[-1]["formula_scope_non_formula_chunk_change"] == result[
+        "formula_scope_non_formula_chunk_change"
+    ]
+    assert events[-1]["formula_scope_non_formula_chunk_deltas"] == result[
+        "formula_scope_non_formula_chunk_deltas"
+    ]
+
+
+def test_index_formulas_blocks_scaling_when_non_formula_scope_counts_change(
+    tmp_path,
+    mock_embedder,
+    sample_chunks,
+):
+    doc_id = "DOC2"
+    item = _indexed_item(tmp_path, doc_id)
+    config = _formula_config(tmp_path / "chroma")
+    store = VectorStore(config.chroma_db_path, mock_embedder)
+    _add_existing_non_formula_chunks(store, doc_id, _doc_meta(item), sample_chunks)
+    indexer = _indexer_for_formula_write(config, store, item)
+    indexer._recognize_formulas_for_item = MagicMock(
+        return_value=[_formula(0, "(1)", r"\sigma = E\varepsilon", "mineru-cache")]
+    )
+    count_before = {"text": 3, "table": 1, "figure": 1, "formula": 0}
+    count_after = {"text": 2, "table": 1, "figure": 1, "formula": 1}
+
+    with (
+        patch.object(store, "count_chunk_types", side_effect=[count_before, count_after]),
+        patch(
+            "zotpilot.feature_extraction.formula_ocr.extract_formula_candidates",
+            return_value=[_formula_candidate(0, "(1)")],
+        ),
+    ):
+        result = indexer.index_formulas(item_key=doc_id, refresh_existing=False)
+
+    assert result["processed"] == 1
+    assert result["formulas_indexed"] == 1
+    assert result["formula_scope_chunk_type_count_delta"] == {
+        "text": -1,
+        "table": 0,
+        "figure": 0,
+        "formula": 1,
+    }
+    assert result["formula_scope_non_formula_chunk_change"] is True
+    assert result["formula_scope_non_formula_chunk_deltas"] == {"text": -1}
+    assert result["write_blocked"] is True
+    assert result["write_ready"] is False
+    assert result["write_block_reasons"] == ["formula_scope_non_formula_chunk_changed"]
+    assert "text/table/figure chunk counts changed" in result["next_action"]

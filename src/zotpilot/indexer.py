@@ -1086,6 +1086,12 @@ def _formula_write_next_action(
     resume_cursor: str,
 ) -> str:
     """Summarize the next safe action after an actual formula write attempt."""
+    if "formula_scope_non_formula_chunk_changed" in write_block_reasons:
+        return (
+            "Stop scaling this formula write batch: text/table/figure chunk counts changed "
+            "inside the formula write scope. Inspect the isolated index or restore from backup "
+            "before writing any production Chroma index."
+        )
     if "candidate_quality_review_required" in write_block_reasons:
         return (
             "Review candidate-stage formula quality warnings before rerunning index_formulas; "
@@ -2305,6 +2311,15 @@ def _chunk_type_count_delta(before: dict[str, int], after: dict[str, int]) -> di
     return {key: int(after.get(key, 0)) - int(before.get(key, 0)) for key in keys}
 
 
+def _non_formula_chunk_type_deltas(delta: dict[str, int]) -> dict[str, int]:
+    """Return text/table/figure deltas that must stay zero during formula writes."""
+    return {
+        chunk_type: value
+        for chunk_type in ("text", "table", "figure")
+        if (value := int(delta.get(chunk_type, 0))) != 0
+    }
+
+
 class ConfigDriftError(RuntimeError):
     """Raised when the persisted index config hash differs from the current config.
 
@@ -3104,7 +3119,24 @@ class Indexer:
             1 for row in results
             if row.get("status") == "deferred_high_density"
         )
+        status_counts = _formula_write_status_counts(results)
+        route_counts = _formula_write_route_counts(results)
+        write_report = _formula_write_report_rows(results)
+        formula_scope_chunk_type_counts_after = _count_formula_scope_chunk_types(
+            self.store,
+            formula_scope_doc_ids,
+        )
+        formula_scope_chunk_type_count_delta = _chunk_type_count_delta(
+            formula_scope_chunk_type_counts_before,
+            formula_scope_chunk_type_counts_after,
+        )
+        formula_scope_non_formula_chunk_deltas = _non_formula_chunk_type_deltas(
+            formula_scope_chunk_type_count_delta
+        )
+        formula_scope_non_formula_chunk_change = bool(formula_scope_non_formula_chunk_deltas)
         write_block_reasons: list[str] = []
+        if formula_scope_non_formula_chunk_change:
+            write_block_reasons.append("formula_scope_non_formula_chunk_changed")
         if candidate_quality_review_queue:
             write_block_reasons.append("candidate_quality_review_required")
         if high_density_deferred_count:
@@ -3128,17 +3160,6 @@ class Indexer:
             next_action = (
                 "Resolve unmatched requested item keys before treating this formula backfill batch as complete."
             )
-        status_counts = _formula_write_status_counts(results)
-        route_counts = _formula_write_route_counts(results)
-        write_report = _formula_write_report_rows(results)
-        formula_scope_chunk_type_counts_after = _count_formula_scope_chunk_types(
-            self.store,
-            formula_scope_doc_ids,
-        )
-        formula_scope_chunk_type_count_delta = _chunk_type_count_delta(
-            formula_scope_chunk_type_counts_before,
-            formula_scope_chunk_type_counts_after,
-        )
         result = {
             "run_id": run_id,
             "provider": provider_name,
@@ -3158,6 +3179,8 @@ class Indexer:
             "formula_scope_chunk_type_counts_before": formula_scope_chunk_type_counts_before,
             "formula_scope_chunk_type_counts_after": formula_scope_chunk_type_counts_after,
             "formula_scope_chunk_type_count_delta": formula_scope_chunk_type_count_delta,
+            "formula_scope_non_formula_chunk_change": formula_scope_non_formula_chunk_change,
+            "formula_scope_non_formula_chunk_deltas": formula_scope_non_formula_chunk_deltas,
             "write_ready": write_ready,
             "write_blocked": write_blocked,
             "write_review_required": write_review_required,
@@ -3221,6 +3244,12 @@ class Indexer:
                 ],
                 "formula_scope_chunk_type_count_delta": result[
                     "formula_scope_chunk_type_count_delta"
+                ],
+                "formula_scope_non_formula_chunk_change": result[
+                    "formula_scope_non_formula_chunk_change"
+                ],
+                "formula_scope_non_formula_chunk_deltas": result[
+                    "formula_scope_non_formula_chunk_deltas"
                 ],
                 "write_ready": result["write_ready"],
                 "write_blocked": result["write_blocked"],
