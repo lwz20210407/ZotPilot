@@ -116,6 +116,60 @@ def _merge_item_key_sources(
     return unique or None
 
 
+def _read_formula_auto_candidate_item_keys(path: str | None) -> list[str]:
+    """Read auto-write formula item keys from a read-only estimate JSON file."""
+    if not path:
+        return []
+    estimate = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(estimate, dict):
+        raise ValueError("formula estimate file must contain a JSON object")
+    if estimate.get("readonly_index_changed") is True:
+        raise ValueError(
+            "formula estimate JSON reports readonly_index_changed=true; rerun the estimate before writing"
+        )
+    if estimate.get("request_complete") is False:
+        raise ValueError(
+            "formula estimate JSON reports request_complete=false; resolve unmatched item keys before writing"
+        )
+    if not isinstance(estimate.get("formula_quality_route_counts"), dict):
+        raise ValueError(
+            "formula estimate JSON does not include formula quality routes; rerun estimate-formula-backfill"
+        )
+    raw_keys = estimate.get("formula_auto_candidate_item_keys")
+    if not isinstance(raw_keys, list):
+        raise ValueError("formula estimate JSON is missing formula_auto_candidate_item_keys")
+    item_keys = [
+        key for key in dict.fromkeys(str(value).strip() for value in raw_keys)
+        if key
+    ]
+    if not item_keys:
+        raise ValueError("formula estimate JSON has no auto-candidate item keys to write")
+
+    route_keys = estimate.get("formula_quality_route_item_keys")
+    if isinstance(route_keys, dict) and isinstance(route_keys.get("auto_candidate"), list):
+        route_auto_keys = [
+            key for key in dict.fromkeys(str(value).strip() for value in route_keys["auto_candidate"])
+            if key
+        ]
+        if route_auto_keys != item_keys:
+            raise ValueError(
+                "formula estimate JSON auto-candidate keys disagree with formula_quality_route_item_keys"
+            )
+    route_summary = estimate.get("formula_quality_route_summary")
+    if isinstance(route_summary, list):
+        summary_auto_keys = [
+            str(row.get("item_key", "") or "").strip()
+            for row in route_summary
+            if isinstance(row, dict) and row.get("quality_route") == "auto_candidate"
+        ]
+        summary_auto_keys = [key for key in dict.fromkeys(summary_auto_keys) if key]
+        if summary_auto_keys and summary_auto_keys != item_keys:
+            raise ValueError(
+                "formula estimate JSON auto-candidate keys disagree with formula_quality_route_summary"
+            )
+    return item_keys
+
+
 def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
     """Keep CLI JSON stdout parseable when dependencies print progress text."""
     if not json_output:
@@ -1179,6 +1233,22 @@ def cmd_index_formulas(args):
         print("Error: formula_ocr_enabled must be true before running index-formulas", file=sys.stderr)
         return 1
 
+    try:
+        auto_candidate_item_keys = _read_formula_auto_candidate_item_keys(
+            getattr(args, "auto_candidates_from_estimate", None)
+        )
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if auto_candidate_item_keys and getattr(args, "all_indexed", False):
+        print("Error: --auto-candidates-from-estimate cannot be combined with --all-indexed", file=sys.stderr)
+        return 1
+    if auto_candidate_item_keys and getattr(args, "limit", None) is not None:
+        print("Error: --auto-candidates-from-estimate cannot be combined with --limit", file=sys.stderr)
+        return 1
+    item_key_scope = args.item_key
+    item_keys_scope = auto_candidate_item_keys or args.item_keys
+
     if getattr(args, "dry_run", False):
         preview_limit = (
             -1
@@ -1188,8 +1258,8 @@ def cmd_index_formulas(args):
         try:
             result = _call_with_json_stdout_guard(
                 lambda: Indexer.for_formula_estimate(config).estimate_formula_backfill(
-                    item_key=args.item_key,
-                    item_keys=args.item_keys,
+                    item_key=item_key_scope,
+                    item_keys=item_keys_scope,
                     limit=args.limit,
                     resume_after=getattr(args, "resume_after", None),
                     daily_call_budget=getattr(args, "daily_call_budget", None),
@@ -1219,7 +1289,7 @@ def cmd_index_formulas(args):
         _print_formula_backfill_estimate(result, preview_limit=preview_limit)
         return _formula_estimate_exit_code(args, result)
 
-    if _is_unscoped_formula_write(args):
+    if _is_unscoped_formula_write(args) and not auto_candidate_item_keys:
         print(
             "Error: refusing unscoped formula write. Run index-formulas --dry-run first, "
             "then pass --item-key, --item-keys, or --limit; add --all-indexed only when "
@@ -1240,8 +1310,8 @@ def cmd_index_formulas(args):
     status_jsonl = getattr(args, "status_jsonl", None)
     try:
         result = Indexer(config).index_formulas(
-            item_key=args.item_key,
-            item_keys=args.item_keys,
+            item_key=item_key_scope,
+            item_keys=item_keys_scope,
             limit=args.limit,
             refresh_existing=not getattr(args, "no_refresh_existing", False),
             daily_call_budget=getattr(args, "daily_call_budget", None),
@@ -2422,6 +2492,14 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="Backfill a space-separated list of Zotero item keys",
+    )
+    index_formula_scope.add_argument(
+        "--auto-candidates-from-estimate",
+        type=str,
+        default=None,
+        help=(
+            "Read formula_auto_candidate_item_keys from a read-only estimate JSON and only backfill those papers"
+        ),
     )
     sub_index_formulas.add_argument("--limit", type=int, default=None, help="Max already-indexed papers to process")
     sub_index_formulas.add_argument(

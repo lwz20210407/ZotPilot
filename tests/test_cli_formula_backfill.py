@@ -122,6 +122,57 @@ def test_formula_pdf_number_options_preserves_config_append_for_dataclass():
     assert updated.formula_candidate_pdf_number_append_missing_candidates is True
 
 
+def test_read_formula_auto_candidate_item_keys_requires_current_route_schema(tmp_path):
+    from zotpilot.cli import _read_formula_auto_candidate_item_keys
+
+    estimate_path = tmp_path / "estimate.json"
+    estimate_path.write_text(
+        json.dumps(
+            {
+                "readonly_index_changed": False,
+                "request_complete": True,
+                "formula_quality_route_counts": {
+                    "auto_candidate": 2,
+                    "review_queue": 1,
+                },
+                "formula_quality_route_item_keys": {
+                    "auto_candidate": ["DOC1", "DOC2"],
+                    "review_queue": ["DOC3"],
+                },
+                "formula_quality_route_summary": [
+                    {"item_key": "DOC1", "quality_route": "auto_candidate"},
+                    {"item_key": "DOC2", "quality_route": "auto_candidate"},
+                    {"item_key": "DOC3", "quality_route": "review_queue"},
+                ],
+                "formula_auto_candidate_item_keys": ["DOC1", "DOC2"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _read_formula_auto_candidate_item_keys(str(estimate_path)) == ["DOC1", "DOC2"]
+
+
+def test_read_formula_auto_candidate_item_keys_rejects_changed_index(tmp_path):
+    from zotpilot.cli import _read_formula_auto_candidate_item_keys
+
+    estimate_path = tmp_path / "estimate.json"
+    estimate_path.write_text(
+        json.dumps(
+            {
+                "readonly_index_changed": True,
+                "request_complete": True,
+                "formula_quality_route_counts": {"auto_candidate": 1},
+                "formula_auto_candidate_item_keys": ["DOC1"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="readonly_index_changed"):
+        _read_formula_auto_candidate_item_keys(str(estimate_path))
+
+
 def test_estimate_formula_backfill_cli_ignores_simpletex_auth_for_read_only_estimate(capsys):
     from zotpilot.cli import cmd_estimate_formula_backfill
 
@@ -877,6 +928,168 @@ def test_index_formulas_cli_passes_budget_resume_and_status_jsonl(tmp_path, caps
         page_min=None,
         page_max=None,
     )
+
+
+def test_index_formulas_cli_scopes_write_to_estimate_auto_candidates(tmp_path, capsys):
+    from zotpilot.cli import cmd_index_formulas
+
+    estimate_path = tmp_path / "estimate.json"
+    estimate_path.write_text(
+        json.dumps(
+            {
+                "readonly_index_changed": False,
+                "request_complete": True,
+                "formula_quality_route_counts": {
+                    "auto_candidate": 2,
+                    "review_queue": 1,
+                },
+                "formula_quality_route_item_keys": {
+                    "auto_candidate": ["DOC1", "DOC2"],
+                    "review_queue": ["DOC3"],
+                },
+                "formula_quality_route_summary": [
+                    {"item_key": "DOC1", "quality_route": "auto_candidate"},
+                    {"item_key": "DOC2", "quality_route": "auto_candidate"},
+                    {"item_key": "DOC3", "quality_route": "review_queue"},
+                ],
+                "formula_auto_candidate_item_keys": ["DOC1", "DOC2"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = MagicMock()
+    config.validate.return_value = []
+    config.formula_ocr_enabled = True
+    config.chroma_db_path = tmp_path / "chroma"
+    indexer = MagicMock()
+    indexer.index_formulas.return_value = {
+        "provider": "local",
+        "processed": 2,
+        "formulas_indexed": 4,
+        "provider_calls_used": 0,
+        "external_calls_used": 0,
+        "write_blocked": False,
+        "write_ready": True,
+        "write_review_required": False,
+        "results": [],
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.index_authority.acquire_lease") as acquire_lease,
+        patch("zotpilot.index_authority.release_lease"),
+        patch("zotpilot.indexer.Indexer", return_value=indexer),
+    ):
+        rc = cmd_index_formulas(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=None,
+                auto_candidates_from_estimate=str(estimate_path),
+                limit=None,
+                all_indexed=False,
+                no_refresh_existing=False,
+                daily_call_budget=0,
+                resume_after=None,
+                no_stop_on_quota=False,
+                status_jsonl=None,
+                low_confidence_threshold=None,
+                include_high_density=False,
+                allow_candidate_quality_warnings=False,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                append_missing_pdf_number_candidates=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                fail_on_write_blocked=False,
+                fail_on_review_required=False,
+                fail_on_unmatched=False,
+                json=False,
+            )
+        )
+
+    assert rc == 0
+    assert "Formula backfill complete:" in capsys.readouterr().out
+    acquire_lease.assert_called_once()
+    indexer.index_formulas.assert_called_once_with(
+        item_key=None,
+        item_keys=["DOC1", "DOC2"],
+        limit=None,
+        refresh_existing=True,
+        daily_call_budget=0,
+        resume_after=None,
+        stop_on_quota=True,
+        status_jsonl=None,
+        low_confidence_threshold=None,
+        include_high_density=False,
+        allow_candidate_quality_warnings=False,
+        pdf_fallback_max_pages=None,
+        page_min=None,
+        page_max=None,
+    )
+
+
+def test_index_formulas_cli_rejects_unstable_auto_candidate_estimate(tmp_path, capsys):
+    from zotpilot.cli import cmd_index_formulas
+
+    estimate_path = tmp_path / "estimate.json"
+    estimate_path.write_text(
+        json.dumps(
+            {
+                "readonly_index_changed": True,
+                "request_complete": True,
+                "formula_quality_route_counts": {"auto_candidate": 1},
+                "formula_auto_candidate_item_keys": ["DOC1"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = MagicMock()
+    config.validate.return_value = []
+    config.formula_ocr_enabled = True
+    config.chroma_db_path = tmp_path / "chroma"
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.index_authority.acquire_lease") as acquire_lease,
+        patch("zotpilot.indexer.Indexer") as indexer_cls,
+    ):
+        rc = cmd_index_formulas(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=None,
+                auto_candidates_from_estimate=str(estimate_path),
+                limit=None,
+                all_indexed=False,
+                no_refresh_existing=False,
+                daily_call_budget=0,
+                resume_after=None,
+                no_stop_on_quota=False,
+                status_jsonl=None,
+                low_confidence_threshold=None,
+                include_high_density=False,
+                allow_candidate_quality_warnings=False,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                append_missing_pdf_number_candidates=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                fail_on_write_blocked=False,
+                fail_on_review_required=False,
+                fail_on_unmatched=False,
+                json=False,
+            )
+        )
+
+    assert rc == 1
+    assert "readonly_index_changed=true" in capsys.readouterr().err
+    acquire_lease.assert_not_called()
+    indexer_cls.assert_not_called()
 
 
 def test_index_formulas_cli_refuses_unscoped_write_without_all_indexed(tmp_path, capsys):
@@ -1648,6 +1861,22 @@ def test_index_formulas_parser_rejects_item_key_and_item_keys_together():
 
     with pytest.raises(SystemExit) as exc:
         main(["index-formulas", "--dry-run", "--item-key", "DOC1", "--item-keys", "DOC2"])
+
+    assert exc.value.code == 2
+
+
+def test_index_formulas_parser_rejects_item_key_and_estimate_scope_together():
+    from zotpilot.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main([
+            "index-formulas",
+            "--dry-run",
+            "--item-key",
+            "DOC1",
+            "--auto-candidates-from-estimate",
+            "estimate.json",
+        ])
 
     assert exc.value.code == 2
 
