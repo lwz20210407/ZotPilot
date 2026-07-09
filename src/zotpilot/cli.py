@@ -1116,6 +1116,28 @@ def _formula_estimate_exit_code(args: object, result: dict[str, object]) -> int:
     return 0
 
 
+def _format_formula_route_counts(result: dict[str, object]) -> str:
+    """Return a compact formula write routing summary for terminal output."""
+    counts = result.get("formula_write_route_counts")
+    if not isinstance(counts, dict):
+        return ""
+    labels = [
+        ("indexed", "indexed"),
+        ("review_queue", "review"),
+        ("deferred", "deferred"),
+        ("skipped", "skipped"),
+        ("failed", "failed"),
+        ("no_formula", "no_formula"),
+        ("unknown", "unknown"),
+    ]
+    parts = [
+        f"{label}={int(counts.get(key) or 0)}"
+        for key, label in labels
+        if int(counts.get(key) or 0) > 0
+    ]
+    return ", ".join(parts)
+
+
 def _is_unscoped_formula_write(args: object) -> bool:
     """Return True when a real formula write would target every matched paper."""
     if getattr(args, "all_indexed", False):
@@ -1260,6 +1282,9 @@ def cmd_index_formulas(args):
             else "not ready"
         )
         print(f"  Write status:            {write_status}")
+    route_counts = _format_formula_route_counts(result)
+    if route_counts:
+        print(f"  Routes:                  {route_counts}")
     if "write_review_required" in result:
         print(f"  Review required:         {'yes' if result.get('write_review_required') else 'no'}")
     if result.get("next_action"):

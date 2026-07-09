@@ -745,6 +745,15 @@ def test_index_formulas_cli_passes_budget_resume_and_status_jsonl(tmp_path, caps
         "write_blocked": True,
         "write_ready": False,
         "write_block_reasons": ["candidate_quality_review_required"],
+        "formula_write_route_counts": {
+            "indexed": 1,
+            "review_queue": 1,
+            "deferred": 1,
+            "skipped": 0,
+            "failed": 0,
+            "no_formula": 0,
+            "unknown": 0,
+        },
         "next_action": "Review candidate-stage formula quality warnings before rerunning.",
         "stopped_reason": "daily_call_budget",
         "resume_cursor": "DOC1",
@@ -790,6 +799,7 @@ def test_index_formulas_cli_passes_budget_resume_and_status_jsonl(tmp_path, caps
     assert rc == 0
     assert "Formula backfill complete:" in out
     assert "Write status:            blocked" in out
+    assert "Routes:                  indexed=1, review=1, deferred=1" in out
     assert "Next:                    Review candidate-stage formula quality warnings before rerunning." in out
     assert "Resume after:            DOC1" in out
     assert "Next item:               DOC2" in out
