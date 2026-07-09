@@ -1663,6 +1663,8 @@ def _formula_candidate_quality_blocking_row(
         "candidate_count": candidate_count,
         "review_reasons": review_reasons,
         "candidate_quality_severity": severity,
+        "source_counts": candidate_audit.get("source_counts", {}),
+        "pdf_number_candidate_count": _formula_pdf_number_candidate_count(candidate_audit),
         "equation_number_warnings": candidate_audit.get("equation_number_warnings", []),
         "truncated_source_count": candidate_audit.get("truncated_source_count", 0),
         "cached_latex_missing_equation_number_count": candidate_audit.get(
@@ -1714,6 +1716,64 @@ def _formula_candidate_quality_blocking_row(
     return row
 
 
+def _formula_pdf_number_candidate_count(candidate_audit: dict[str, object]) -> int:
+    """Return count of PDF text-layer equation-number candidates added for review."""
+    source_counts = candidate_audit.get("source_counts", {})
+    if not isinstance(source_counts, dict):
+        return 0
+    return sum(
+        value
+        for key, value in source_counts.items()
+        if isinstance(key, str)
+        and key.startswith("pdf_text_equation_number")
+        and isinstance(value, int)
+    )
+
+
+def _formula_semantic_pdf_number_match_rows(
+    results: list[dict[str, object]],
+    *,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    """Return rows where PDF-number candidates satisfy semantic evidence."""
+    rows: list[dict[str, object]] = []
+    for row in results:
+        candidate_audit = row.get("candidate_audit", {})
+        if not isinstance(candidate_audit, dict):
+            continue
+        pdf_number_count = _formula_pdf_number_candidate_count(candidate_audit)
+        if pdf_number_count <= 0:
+            continue
+        semantic_evidence = row.get("semantic_formula_evidence", {})
+        if not isinstance(semantic_evidence, dict):
+            continue
+        if semantic_evidence.get("reference_match_status") != "all_matched":
+            continue
+        reference_numbers = semantic_evidence.get("equation_reference_numbers", [])
+        if not isinstance(reference_numbers, list) or not reference_numbers:
+            continue
+        review_reasons = _formula_candidate_blocking_review_reasons(candidate_audit)
+        rows.append({
+            "item_key": row.get("item_key", ""),
+            "title": row.get("title", ""),
+            "candidate_count": row.get("candidate_count", 0),
+            "pdf_number_candidate_count": pdf_number_count,
+            "semantic_reference_count": len(reference_numbers),
+            "semantic_formula_reference_match_status": "all_matched",
+            "quality_review_required": bool(review_reasons),
+            "quality_review_reasons": review_reasons,
+            "source_counts": candidate_audit.get("source_counts", {}),
+        })
+    return sorted(
+        rows,
+        key=lambda row: (
+            bool(row.get("quality_review_required")),
+            -int(row.get("pdf_number_candidate_count", 0) or 0),
+            str(row.get("item_key", "")),
+        ),
+    )[:max(limit, 0)]
+
+
 def _int_metadata_value(value: object) -> int:
     """Return integer metadata values without accepting arbitrary strings."""
     return value if isinstance(value, int) else 0
@@ -1758,6 +1818,7 @@ def _formula_candidate_quality_source_totals(
         "cached_latex_low_quality_count",
         "text_layer_candidate_count",
         "structured_cache_candidate_count",
+        "pdf_number_candidate_count",
         "ocr_needed_count",
         "equation_number_sequence_break_count",
         "missing_equation_number_total",
@@ -1837,6 +1898,7 @@ def _formula_review_summary_rows(
             "candidate_quality_severity": severity,
             "review_reasons": review_reasons,
             "candidate_count": row.get("candidate_count", 0),
+            "pdf_number_candidate_count": row.get("pdf_number_candidate_count", 0),
             "semantic_formula_unmatched_reference_count": semantic_unmatched,
             "semantic_formula_unmatched_reference_numbers": row.get(
                 "semantic_formula_unmatched_reference_numbers",
@@ -3429,6 +3491,7 @@ class Indexer:
             dense_formula_rows=dense_formula_papers,
             scan_limited_rows=scan_limited_high_density_papers,
         )
+        semantic_formula_pdf_number_match_papers = _formula_semantic_pdf_number_match_rows(results)
         summary = {
             "papers": processed,
             "selected": selected,
@@ -3472,6 +3535,11 @@ class Indexer:
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "formula_review_summary_count": len(formula_review_summary),
+            "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
+            "semantic_formula_pdf_number_match_candidate_count": sum(
+                int(row.get("pdf_number_candidate_count", 0) or 0)
+                for row in semantic_formula_pdf_number_match_papers
+            ),
             "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
             "semantic_formula_unmatched_reference_paper_count": sum(
                 1
@@ -3538,6 +3606,11 @@ class Indexer:
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "formula_review_summary": formula_review_summary,
             "formula_review_summary_count": len(formula_review_summary),
+            "semantic_formula_pdf_number_match_papers": semantic_formula_pdf_number_match_papers,
+            "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
+            "semantic_formula_pdf_number_match_candidate_count": summary[
+                "semantic_formula_pdf_number_match_candidate_count"
+            ],
             "semantic_formula_evidence_paper_count": len(semantic_formula_evidence_papers),
             "semantic_formula_unmatched_reference_paper_count": summary[
                 "semantic_formula_unmatched_reference_paper_count"

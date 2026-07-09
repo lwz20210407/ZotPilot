@@ -31,6 +31,69 @@ def test_semantic_gap_review_switches_after_missing_candidate_repair_attempt():
     assert after_repair_attempt["repair_attempted"] is True
 
 
+def test_semantic_pdf_number_match_rows_report_pdf_number_candidates():
+    from zotpilot.indexer import _formula_semantic_pdf_number_match_rows
+
+    rows = _formula_semantic_pdf_number_match_rows(
+        [
+            {
+                "item_key": "OK1",
+                "title": "Recovered paper",
+                "candidate_count": 15,
+                "candidate_audit": {
+                    "source_counts": {
+                        "mineru_content_list": 12,
+                        "pdf_text_equation_number": 3,
+                    },
+                    "equation_number_warnings": [],
+                    "has_truncated_source": False,
+                },
+                "semantic_formula_evidence": {
+                    "reference_match_status": "all_matched",
+                    "equation_reference_numbers": ["(1)", "(2)", "(3)"],
+                },
+            },
+            {
+                "item_key": "TRUNC",
+                "title": "Recovered but review needed",
+                "candidate_count": 9,
+                "candidate_audit": {
+                    "source_counts": {
+                        "pdf_text_equation_number_truncated": 1,
+                    },
+                    "equation_number_warnings": ["missing_equation_number_gap"],
+                    "has_truncated_source": True,
+                    "truncated_source_count": 1,
+                },
+                "semantic_formula_evidence": {
+                    "reference_match_status": "all_matched",
+                    "equation_reference_numbers": ["(4)"],
+                },
+            },
+            {
+                "item_key": "MISS",
+                "title": "Still missing",
+                "candidate_count": 8,
+                "candidate_audit": {"source_counts": {"pdf_text_equation_number": 2}},
+                "semantic_formula_evidence": {
+                    "reference_match_status": "partial_match",
+                    "equation_reference_numbers": ["(1)", "(2)"],
+                },
+            },
+        ]
+    )
+
+    assert [row["item_key"] for row in rows] == ["OK1", "TRUNC"]
+    assert rows[0]["pdf_number_candidate_count"] == 3
+    assert rows[0]["quality_review_required"] is False
+    assert rows[1]["pdf_number_candidate_count"] == 1
+    assert rows[1]["quality_review_required"] is True
+    assert rows[1]["quality_review_reasons"] == [
+        "fallback_truncated",
+        "missing_equation_number_gap",
+    ]
+
+
 @dataclass
 class _HashCfg:
     """Minimal real dataclass carrying every field _config_hash reads.
@@ -2597,6 +2660,7 @@ class TestFormulaBackfill:
             "cached_latex_low_quality_count": 0,
             "text_layer_candidate_count": 0,
             "structured_cache_candidate_count": 3,
+            "pdf_number_candidate_count": 0,
             "ocr_needed_count": 0,
             "equation_number_sequence_break_count": 1,
             "missing_equation_number_total": 1,
@@ -2619,6 +2683,7 @@ class TestFormulaBackfill:
                 "candidate_quality_severity": "minor_numbering_gap",
                 "review_reasons": ["missing_equation_number_gap"],
                 "candidate_count": 3,
+                "pdf_number_candidate_count": 0,
                 "semantic_formula_unmatched_reference_count": 0,
                 "semantic_formula_unmatched_reference_numbers": [],
                 "semantic_formula_evidence_count": 0,
@@ -2638,6 +2703,8 @@ class TestFormulaBackfill:
                 "candidate_count": 3,
                 "review_reasons": ["missing_equation_number_gap"],
                 "candidate_quality_severity": "minor_numbering_gap",
+                "source_counts": {"mineru_content_list": 3},
+                "pdf_number_candidate_count": 0,
                 "equation_number_warnings": ["missing_equation_number_gap"],
                 "truncated_source_count": 0,
                 "cached_latex_missing_equation_number_count": 0,
