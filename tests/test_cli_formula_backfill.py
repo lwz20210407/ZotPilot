@@ -726,6 +726,63 @@ def test_estimate_formula_backfill_cli_json_can_fail_on_unmatched_requested_item
     assert json.loads(out)["unmatched_requested_item_keys"] == ["MISSING1"]
 
 
+def test_estimate_formula_backfill_cli_can_fail_on_readonly_index_change(capsys):
+    from zotpilot.cli import cmd_estimate_formula_backfill
+
+    config = MagicMock()
+    config.validate.return_value = []
+    indexer = MagicMock()
+    warning = (
+        "The Chroma SQLite index changed during this read-only estimate; discard this "
+        "batch as validation evidence and check for concurrent ZotPilot index writers."
+    )
+    indexer.estimate_formula_backfill.return_value = {
+        "provider": "simpletex",
+        "candidate_provider": "mineru_cache",
+        "processed": 1,
+        "candidate_count": 2,
+        "average_candidates_per_paper": 2.0,
+        "estimated_provider_calls": 0,
+        "estimated_external_calls": 0,
+        "estimated_min_duration": "0s",
+        "daily_call_budget": 1800,
+        "estimated_runs": 1,
+        "data_egress": False,
+        "readonly_index_changed": True,
+        "summary": {"warnings": [warning], "next_action": "Rerun after the index is stable."},
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer),
+    ):
+        rc = cmd_estimate_formula_backfill(
+            SimpleNamespace(
+                config="config.json",
+                item_key=None,
+                item_keys=["DOC1"],
+                limit=None,
+                resume_after=None,
+                daily_call_budget=1800,
+                preview_candidates=0,
+                preview_all_candidates=False,
+                preview_chars=160,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                fail_on_readonly_index_changed=True,
+                json=False,
+            )
+        )
+
+    out = capsys.readouterr().out
+    assert rc == 6
+    assert "changed during this read-only estimate" in out
+
+
 def test_index_formulas_cli_passes_budget_resume_and_status_jsonl(tmp_path, capsys):
     from zotpilot.cli import cmd_index_formulas
 
@@ -1663,6 +1720,56 @@ def test_index_formulas_dry_run_cli_can_fail_on_candidate_quality_blocked(tmp_pa
     assert "[dry-run] No formula chunks were written." in out
     assert "Candidate quality blocked: 1" in out
     assert "Next: Review candidate-stage formula quality warnings before writing formulas." in out
+    acquire_lease.assert_not_called()
+
+
+def test_index_formulas_dry_run_cli_can_fail_on_readonly_index_change(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    config = MagicMock()
+    config.validate.return_value = ["SimpleTex formula OCR requires formula_ocr_simpletex_token"]
+    config.formula_ocr_enabled = True
+    config.chroma_db_path = tmp_path / "chroma"
+    indexer = MagicMock()
+    indexer.estimate_formula_backfill.return_value = {
+        "provider": "simpletex",
+        "candidate_provider": "mineru_cache",
+        "processed": 1,
+        "candidate_count": 0,
+        "average_candidates_per_paper": 0.0,
+        "estimated_provider_calls": 0,
+        "estimated_external_calls": 0,
+        "estimated_min_duration": "0s",
+        "daily_call_budget": 0,
+        "estimated_runs": 1,
+        "data_egress": False,
+        "readonly_index_changed": True,
+        "summary": {
+            "next_action": "Rerun after the index is stable.",
+            "warnings": ["The Chroma SQLite index changed during this read-only estimate."],
+        },
+        "results": [],
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.index_authority.acquire_lease") as acquire_lease,
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer),
+    ):
+        rc = main(
+            [
+                "index-formulas",
+                "--dry-run",
+                "--item-key",
+                "DOC1",
+                "--fail-on-readonly-index-changed",
+            ]
+        )
+
+    out = capsys.readouterr().out
+    assert rc == 6
+    assert "[dry-run] No formula chunks were written." in out
+    assert "changed during this read-only estimate" in out
     acquire_lease.assert_not_called()
 
 

@@ -1102,6 +1102,8 @@ def _formula_backfill_exit_code(args: object, result: dict[str, object]) -> int:
 
 def _formula_estimate_exit_code(args: object, result: dict[str, object]) -> int:
     """Return the CLI exit code for formula backfill estimate guard outcomes."""
+    if getattr(args, "fail_on_readonly_index_changed", False) and result.get("readonly_index_changed"):
+        return 6
     if getattr(args, "fail_on_unmatched", False) and _unmatched_requested_item_count(result) > 0:
         return 5
     if getattr(args, "fail_on_write_blocked", False) and result.get("write_blocked"):
@@ -2578,6 +2580,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Return exit code 5 when requested item keys are not matched",
     )
+    sub_index_formulas.add_argument(
+        "--fail-on-readonly-index-changed",
+        action="store_true",
+        help="With --dry-run, return exit code 6 when the Chroma index changes during estimation",
+    )
     sub_index_formulas.add_argument("--json", action="store_true", help="Output the full result as JSON")
     sub_index_formulas.add_argument("--config", type=str, default=None, help="Config file path")
     sub_index_formulas.set_defaults(func=cmd_index_formulas)
@@ -2700,6 +2707,11 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-unmatched",
         action="store_true",
         help="Return exit code 5 when requested item keys are not matched",
+    )
+    sub_formula_estimate.add_argument(
+        "--fail-on-readonly-index-changed",
+        action="store_true",
+        help="Return exit code 6 when the Chroma index changes during this read-only estimate",
     )
     sub_formula_estimate.add_argument("--json", action="store_true", help="Output the full estimate as JSON")
     sub_formula_estimate.add_argument("--config", type=str, default=None, help="Config file path")
