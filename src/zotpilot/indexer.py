@@ -1774,6 +1774,141 @@ def _formula_semantic_pdf_number_match_rows(
     )[:max(limit, 0)]
 
 
+def _formula_estimate_quality_route_counts(
+    rows: list[dict[str, object]],
+) -> dict[str, int]:
+    """Count read-only formula estimate rows by production routing bucket."""
+    counts = {
+        "auto_candidate": 0,
+        "review_queue": 0,
+        "deferred_high_density": 0,
+        "skipped": 0,
+        "failed": 0,
+        "no_formula_candidate": 0,
+    }
+    for row in rows:
+        route = str(row.get("quality_route", "") or "")
+        if route in counts:
+            counts[route] += 1
+    return counts
+
+
+def _formula_estimate_quality_route_summary(
+    *,
+    results: list[dict[str, object]],
+    candidate_quality_rows: list[dict[str, object]],
+    scan_limited_rows: list[dict[str, object]],
+    high_density_plan_rows: list[dict[str, object]],
+    include_high_density: bool,
+) -> list[dict[str, object]]:
+    """Return per-paper routing for safe read-only formula backfill planning."""
+    candidate_quality_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in candidate_quality_rows
+        if row.get("item_key")
+    }
+    scan_limited_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in scan_limited_rows
+        if row.get("item_key")
+    }
+    plan_by_key = {
+        str(row.get("item_key", "") or ""): row
+        for row in high_density_plan_rows
+        if row.get("item_key")
+    }
+    rows: list[dict[str, object]] = []
+    for row in results:
+        item_key = str(row.get("item_key", "") or "")
+        candidate_count = _int_metadata_value(row.get("candidate_count", 0))
+        quality_row = candidate_quality_by_key.get(item_key)
+        scan_limited_row = scan_limited_by_key.get(item_key)
+        plan_row = plan_by_key.get(item_key)
+        route = "auto_candidate"
+        route_reason = "candidate_quality_clear"
+        recommended_review_mode = ""
+        candidate_quality_severity = ""
+        review_reasons: list[object] = []
+        if row.get("status") == "skipped":
+            route = "skipped"
+            route_reason = str(row.get("reason", "skipped") or "skipped")
+        elif row.get("error"):
+            route = "failed"
+            route_reason = str(row.get("error", "candidate_detection_failed") or "candidate_detection_failed")
+        elif row.get("default_batch_status") == "deferred_high_density":
+            route = "deferred_high_density"
+            route_reason = "high_density_formula_document"
+        elif quality_row is not None and scan_limited_row is not None:
+            route = "review_queue"
+            route_reason = "estimate_incomplete_candidate_review"
+            candidate_quality_severity = str(
+                quality_row.get("candidate_quality_severity", "") or "candidate_quality_review"
+            )
+            review_reasons = list(quality_row.get("review_reasons", []) or [])
+            scan_reason = str(scan_limited_row.get("reason", "scan_limit") or "scan_limit")
+            if scan_reason not in review_reasons:
+                review_reasons.append(scan_reason)
+            recommended_review = scan_limited_row.get("recommended_review", {})
+            if not isinstance(recommended_review, dict) or not recommended_review:
+                recommended_review = quality_row.get("recommended_review", {})
+            if isinstance(recommended_review, dict):
+                recommended_review_mode = str(recommended_review.get("mode", "") or "")
+        elif scan_limited_row is not None:
+            route = "review_queue"
+            route_reason = str(scan_limited_row.get("reason", "scan_limit") or "scan_limit")
+            review_reasons = [route_reason]
+            recommended_review = scan_limited_row.get("recommended_review", {})
+            if isinstance(recommended_review, dict):
+                recommended_review_mode = str(recommended_review.get("mode", "") or "")
+        elif quality_row is not None:
+            route = "review_queue"
+            candidate_quality_severity = str(
+                quality_row.get("candidate_quality_severity", "") or "candidate_quality_review"
+            )
+            route_reason = candidate_quality_severity
+            review_reasons = list(quality_row.get("review_reasons", []) or [])
+            recommended_review = quality_row.get("recommended_review", {})
+            if isinstance(recommended_review, dict):
+                recommended_review_mode = str(recommended_review.get("mode", "") or "")
+        elif plan_row is not None and not include_high_density:
+            route = "review_queue"
+            route_reason = "high_density_plan_review_required"
+        elif candidate_count <= 0:
+            route = "no_formula_candidate"
+            route_reason = "no_formula_candidates_found"
+        route_row = {
+            "item_key": item_key,
+            "title": row.get("title", ""),
+            "quality_route": route,
+            "route_reason": route_reason,
+            "candidate_count": candidate_count,
+            "estimated_provider_calls": row.get("estimated_provider_calls", 0),
+            "estimated_external_calls": row.get("estimated_external_calls", 0),
+            "review_reasons": review_reasons,
+            "candidate_quality_severity": candidate_quality_severity,
+            "recommended_review_mode": recommended_review_mode,
+            "semantic_formula_unmatched_reference_count": row.get(
+                "semantic_formula_unmatched_reference_count",
+                0,
+            ),
+            "semantic_formula_unmatched_reference_numbers": row.get(
+                "semantic_formula_unmatched_reference_numbers",
+                [],
+            ),
+            "semantic_formula_reference_match_status": row.get(
+                "semantic_formula_reference_match_status",
+                "",
+            ),
+            "semantic_formula_review_flags": row.get("semantic_formula_review_flags", []),
+        }
+        if plan_row is not None:
+            route_row.update(_formula_high_density_plan_summary_fields(plan_row))
+        if row.get("high_density_trigger"):
+            route_row["high_density_trigger"] = row.get("high_density_trigger", "")
+        rows.append(route_row)
+    return rows
+
+
 def _int_metadata_value(value: object) -> int:
     """Return integer metadata values without accepting arbitrary strings."""
     return value if isinstance(value, int) else 0
@@ -3517,6 +3652,16 @@ class Indexer:
             high_density_plan_rows=high_density_backfill_plans,
         )
         semantic_formula_pdf_number_match_papers = _formula_semantic_pdf_number_match_rows(results)
+        formula_quality_route_summary = _formula_estimate_quality_route_summary(
+            results=results,
+            candidate_quality_rows=candidate_quality_blocking_papers,
+            scan_limited_rows=scan_limited_high_density_papers,
+            high_density_plan_rows=high_density_backfill_plans,
+            include_high_density=include_high_density,
+        )
+        formula_quality_route_counts = _formula_estimate_quality_route_counts(
+            formula_quality_route_summary
+        )
         summary = {
             "papers": processed,
             "selected": selected,
@@ -3560,6 +3705,8 @@ class Indexer:
             "candidate_quality_blocking_severity_counts": candidate_quality_blocking_severity_counts,
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "formula_review_summary_count": len(formula_review_summary),
+            "formula_quality_route_counts": formula_quality_route_counts,
+            "formula_quality_route_summary_count": len(formula_quality_route_summary),
             "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
             "semantic_formula_pdf_number_match_candidate_count": sum(
                 int(row.get("pdf_number_candidate_count", 0) or 0)
@@ -3631,6 +3778,9 @@ class Indexer:
             "candidate_quality_blocking_source_totals": candidate_quality_blocking_source_totals,
             "formula_review_summary": formula_review_summary,
             "formula_review_summary_count": len(formula_review_summary),
+            "formula_quality_route_counts": formula_quality_route_counts,
+            "formula_quality_route_summary": formula_quality_route_summary,
+            "formula_quality_route_summary_count": len(formula_quality_route_summary),
             "semantic_formula_pdf_number_match_papers": semantic_formula_pdf_number_match_papers,
             "semantic_formula_pdf_number_match_paper_count": len(semantic_formula_pdf_number_match_papers),
             "semantic_formula_pdf_number_match_candidate_count": summary[

@@ -94,6 +94,132 @@ def test_semantic_pdf_number_match_rows_report_pdf_number_candidates():
     ]
 
 
+def test_formula_estimate_quality_route_summary_splits_production_buckets():
+    from zotpilot.indexer import (
+        _formula_estimate_quality_route_counts,
+        _formula_estimate_quality_route_summary,
+    )
+
+    rows = _formula_estimate_quality_route_summary(
+        results=[
+            {
+                "item_key": "OK1",
+                "title": "Clean paper",
+                "candidate_count": 4,
+                "estimated_provider_calls": 0,
+            },
+            {
+                "item_key": "REV1",
+                "title": "Needs semantic repair",
+                "candidate_count": 6,
+                "estimated_provider_calls": 2,
+                "semantic_formula_unmatched_reference_count": 1,
+                "semantic_formula_unmatched_reference_numbers": ["(7)"],
+                "semantic_formula_reference_match_status": "partial_match",
+            },
+            {
+                "item_key": "DENSE1",
+                "title": "Dense book",
+                "candidate_count": 161,
+                "estimated_provider_calls": 161,
+                "default_batch_status": "deferred_high_density",
+                "high_density_trigger": "candidate_count",
+            },
+            {
+                "item_key": "PLAN1",
+                "title": "Single dense thesis",
+                "candidate_count": 240,
+                "estimated_provider_calls": 240,
+            },
+            {
+                "item_key": "SCANREV1",
+                "title": "Scan-limited paper with numbering issues",
+                "candidate_count": 162,
+                "estimated_provider_calls": 0,
+            },
+            {
+                "item_key": "SKIP1",
+                "title": "Translated PDF",
+                "status": "skipped",
+                "reason": "bilingual_or_translated_pdf",
+                "candidate_count": 0,
+            },
+            {
+                "item_key": "FAIL1",
+                "title": "Broken PDF",
+                "candidate_count": 0,
+                "error": "RuntimeError",
+            },
+            {
+                "item_key": "EMPTY1",
+                "title": "No formulas",
+                "candidate_count": 0,
+            },
+        ],
+        candidate_quality_rows=[
+            {
+                "item_key": "REV1",
+                "candidate_quality_severity": "semantic_evidence_unmatched_references",
+                "review_reasons": ["semantic_evidence_unmatched_equation_references"],
+                "recommended_review": {"mode": "semantic_missing_candidate_repair"},
+            },
+            {
+                "item_key": "SCANREV1",
+                "candidate_quality_severity": "cached_latex_numbering",
+                "review_reasons": ["cached_latex_missing_equation_numbers"],
+                "recommended_review": {"mode": "cached_latex_quality_review"},
+            }
+        ],
+        scan_limited_rows=[
+            {
+                "item_key": "SCANREV1",
+                "reason": "scan_limit",
+                "recommended_review": {"mode": "single_item_readonly_estimate"},
+            }
+        ],
+        high_density_plan_rows=[
+            {
+                "item_key": "PLAN1",
+                "segment_count": 3,
+                "page_min": 10,
+                "page_max": 80,
+                "segment_candidate_limit": 160,
+                "segment_provider_call_limit": 80,
+            }
+        ],
+        include_high_density=False,
+    )
+
+    rows_by_key = {row["item_key"]: row for row in rows}
+    assert _formula_estimate_quality_route_counts(rows) == {
+        "auto_candidate": 1,
+        "review_queue": 3,
+        "deferred_high_density": 1,
+        "skipped": 1,
+        "failed": 1,
+        "no_formula_candidate": 1,
+    }
+    assert rows_by_key["OK1"]["quality_route"] == "auto_candidate"
+    assert rows_by_key["REV1"]["quality_route"] == "review_queue"
+    assert rows_by_key["REV1"]["recommended_review_mode"] == "semantic_missing_candidate_repair"
+    assert rows_by_key["DENSE1"]["quality_route"] == "deferred_high_density"
+    assert rows_by_key["DENSE1"]["high_density_trigger"] == "candidate_count"
+    assert rows_by_key["PLAN1"]["quality_route"] == "review_queue"
+    assert rows_by_key["PLAN1"]["route_reason"] == "high_density_plan_review_required"
+    assert rows_by_key["PLAN1"]["high_density_plan_segment_count"] == 3
+    assert rows_by_key["SCANREV1"]["quality_route"] == "review_queue"
+    assert rows_by_key["SCANREV1"]["route_reason"] == "estimate_incomplete_candidate_review"
+    assert rows_by_key["SCANREV1"]["candidate_quality_severity"] == "cached_latex_numbering"
+    assert rows_by_key["SCANREV1"]["review_reasons"] == [
+        "cached_latex_missing_equation_numbers",
+        "scan_limit",
+    ]
+    assert rows_by_key["SCANREV1"]["recommended_review_mode"] == "single_item_readonly_estimate"
+    assert rows_by_key["SKIP1"]["quality_route"] == "skipped"
+    assert rows_by_key["FAIL1"]["quality_route"] == "failed"
+    assert rows_by_key["EMPTY1"]["quality_route"] == "no_formula_candidate"
+
+
 @dataclass
 class _HashCfg:
     """Minimal real dataclass carrying every field _config_hash reads.
@@ -2696,6 +2822,26 @@ class TestFormulaBackfill:
                 "recommended_review_reason": "missing_equation_number_gap",
             }
         ]
+        assert result["formula_quality_route_counts"] == {
+            "auto_candidate": 0,
+            "review_queue": 1,
+            "deferred_high_density": 0,
+            "skipped": 0,
+            "failed": 0,
+            "no_formula_candidate": 0,
+        }
+        assert result["summary"]["formula_quality_route_counts"] == result["formula_quality_route_counts"]
+        assert result["formula_quality_route_summary_count"] == 1
+        assert result["summary"]["formula_quality_route_summary_count"] == 1
+        assert result["formula_quality_route_summary"][0]["item_key"] == "DOC1"
+        assert result["formula_quality_route_summary"][0]["quality_route"] == "review_queue"
+        assert result["formula_quality_route_summary"][0]["route_reason"] == "minor_numbering_gap"
+        assert result["formula_quality_route_summary"][0]["review_reasons"] == [
+            "missing_equation_number_gap"
+        ]
+        assert result["formula_quality_route_summary"][0]["recommended_review_mode"] == (
+            "candidate_numbering_review"
+        )
         assert result["candidate_quality_blocking_papers"] == [
             {
                 "item_key": "DOC1",
