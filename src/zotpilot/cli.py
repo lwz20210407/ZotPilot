@@ -1229,9 +1229,6 @@ def cmd_index_formulas(args):
         return 1
     for w in api_warnings:
         print(f"Warning: {w} (configure with `zotpilot setup` or `zotpilot config set ...`)", file=sys.stderr)
-    if not config.formula_ocr_enabled:
-        print("Error: formula_ocr_enabled must be true before running index-formulas", file=sys.stderr)
-        return 1
 
     try:
         auto_candidate_item_keys = _read_formula_auto_candidate_item_keys(
@@ -1288,6 +1285,10 @@ def cmd_index_formulas(args):
         print("[dry-run] No formula chunks were written.")
         _print_formula_backfill_estimate(result, preview_limit=preview_limit)
         return _formula_estimate_exit_code(args, result)
+
+    if not config.formula_ocr_enabled:
+        print("Error: formula_ocr_enabled must be true before running index-formulas", file=sys.stderr)
+        return 1
 
     if _is_unscoped_formula_write(args) and not auto_candidate_item_keys:
         print(
