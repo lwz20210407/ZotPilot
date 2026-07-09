@@ -145,6 +145,23 @@ def _equation_number_match_keys(value: str) -> set[str]:
     return keys
 
 
+def _expand_equation_reference_range(value: str) -> list[str]:
+    """Expand compact same-prefix equation ranges such as ``(5.38-5.40)``."""
+    normalized = normalize_equation_number(value)
+    match = re.fullmatch(
+        r"(?P<prefix>\d+(?:[.-]\d+)*[.-])(?P<start>\d+)-(?P=prefix)(?P<end>\d+)",
+        normalized,
+    )
+    if match is None:
+        return [format_equation_number(normalized)] if normalized else []
+    start = int(match.group("start"))
+    end = int(match.group("end"))
+    if end <= start or end - start > 30:
+        return [format_equation_number(normalized)]
+    prefix = match.group("prefix")
+    return [format_equation_number(f"{prefix}{number}") for number in range(start, end + 1)]
+
+
 def extract_equation_references(text: str) -> list[str]:
     """Extract explicit equation references from text chunks.
 
@@ -300,10 +317,11 @@ def summarize_formula_semantic_evidence(
     seen_references: set[str] = set()
     for row in evidence:
         for display_number in row.equation_numbers:
-            normalized_number = normalize_equation_number(display_number)
-            if normalized_number and normalized_number not in seen_references:
-                seen_references.add(normalized_number)
-                reference_numbers.append(format_equation_number(normalized_number))
+            for expanded_number in _expand_equation_reference_range(display_number):
+                normalized_number = normalize_equation_number(expanded_number)
+                if normalized_number and normalized_number not in seen_references:
+                    seen_references.add(normalized_number)
+                    reference_numbers.append(format_equation_number(normalized_number))
 
     unmatched = [
         display_number

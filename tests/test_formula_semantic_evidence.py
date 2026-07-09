@@ -105,6 +105,32 @@ def test_formula_semantic_evidence_matches_collapsed_chapter_number_aliases():
     assert summary["reference_coverage_ratio"] == 1.0
 
 
+def test_formula_semantic_evidence_expands_same_prefix_equation_ranges():
+    chunks = [
+        StoredChunk(
+            id="DOC1_chunk_0007",
+            text="The update follows Eqs. (4.3.47-4.3.51) and Eq. (4-9).",
+            metadata={"chunk_type": "text", "page_num": 7, "chunk_index": 7, "section": "methods"},
+        ),
+    ]
+
+    summary = summarize_formula_semantic_evidence(
+        chunks,
+        candidate_equation_numbers=["(4.3.47)", "(4.3.48)", "(4.3.49)", "(4-9)"],
+    )
+
+    assert summary["equation_reference_numbers"] == [
+        "(4.3.47)",
+        "(4.3.48)",
+        "(4.3.49)",
+        "(4.3.50)",
+        "(4.3.51)",
+        "(4-9)",
+    ]
+    assert summary["matched_reference_numbers"] == ["(4.3.47)", "(4.3.48)", "(4.3.49)", "(4-9)"]
+    assert summary["unmatched_reference_numbers"] == ["(4.3.50)", "(4.3.51)"]
+
+
 def test_formula_semantic_evidence_tracks_formula_like_chunks_without_numbers():
     chunks = [
         StoredChunk(
