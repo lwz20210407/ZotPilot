@@ -216,6 +216,25 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
     assert first["formulas_indexed"] == 2
     assert first["write_ready"] is True
     assert first["results"][0]["status"] == "indexed"
+    assert first["formula_scope_doc_ids"] == [doc_id]
+    assert first["formula_scope_chunk_type_counts_before"] == {
+        "text": 3,
+        "table": 1,
+        "figure": 1,
+        "formula": 0,
+    }
+    assert first["formula_scope_chunk_type_counts_after"] == {
+        "text": 3,
+        "table": 1,
+        "figure": 1,
+        "formula": 2,
+    }
+    assert first["formula_scope_chunk_type_count_delta"] == {
+        "text": 0,
+        "table": 0,
+        "figure": 0,
+        "formula": 2,
+    }
     assert store.count_chunk_types({doc_id}) == {
         "text": 3,
         "table": 1,
@@ -245,6 +264,25 @@ def test_index_formulas_writes_to_isolated_store_without_touching_existing_chunk
     assert second["formulas_indexed"] == 1
     assert second["write_ready"] is True
     assert second["results"][0]["status"] == "indexed"
+    assert second["formula_scope_doc_ids"] == [doc_id]
+    assert second["formula_scope_chunk_type_counts_before"] == {
+        "text": 3,
+        "table": 1,
+        "figure": 1,
+        "formula": 2,
+    }
+    assert second["formula_scope_chunk_type_counts_after"] == {
+        "text": 3,
+        "table": 1,
+        "figure": 1,
+        "formula": 1,
+    }
+    assert second["formula_scope_chunk_type_count_delta"] == {
+        "text": 0,
+        "table": 0,
+        "figure": 0,
+        "formula": -1,
+    }
     assert store.count_chunk_types({doc_id}) == {
         "text": 3,
         "table": 1,
@@ -391,3 +429,13 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert events[-1]["formula_write_status_counts"] == result["formula_write_status_counts"]
     assert events[-1]["formula_write_route_counts"] == result["formula_write_route_counts"]
     assert events[-1]["formula_write_report"] == result["formula_write_report"]
+    assert events[-1]["formula_scope_doc_ids"] == result["formula_scope_doc_ids"]
+    assert events[-1]["formula_scope_chunk_type_counts_before"] == result[
+        "formula_scope_chunk_type_counts_before"
+    ]
+    assert events[-1]["formula_scope_chunk_type_counts_after"] == result[
+        "formula_scope_chunk_type_counts_after"
+    ]
+    assert events[-1]["formula_scope_chunk_type_count_delta"] == result[
+        "formula_scope_chunk_type_count_delta"
+    ]

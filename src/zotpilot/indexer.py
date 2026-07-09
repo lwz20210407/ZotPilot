@@ -2276,6 +2276,35 @@ def _formula_latex_has_relation(latex: str) -> bool:
     return bool(re.search(relation_pattern, latex))
 
 
+def _count_formula_scope_chunk_types(store, doc_ids: list[str]) -> dict[str, int]:
+    """Return best-effort chunk-type counts for the formula write scope."""
+    if not doc_ids:
+        return {}
+    counter = getattr(store, "count_chunk_types", None)
+    if not callable(counter):
+        return {}
+    try:
+        counts = counter(set(doc_ids))
+    except Exception:
+        return {}
+    if not isinstance(counts, dict):
+        return {}
+    normalized: dict[str, int] = {}
+    for chunk_type, value in counts.items():
+        if isinstance(chunk_type, str) and isinstance(value, int):
+            normalized[chunk_type] = value
+    return normalized
+
+
+def _chunk_type_count_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """Return stable chunk-type deltas for formula write audit reports."""
+    if not before and not after:
+        return {}
+    ordered_keys = ["text", "table", "figure", "formula"]
+    keys = ordered_keys + sorted((set(before) | set(after)) - set(ordered_keys))
+    return {key: int(after.get(key, 0)) - int(before.get(key, 0)) for key in keys}
+
+
 class ConfigDriftError(RuntimeError):
     """Raised when the persisted index config hash differs from the current config.
 
@@ -2607,6 +2636,11 @@ class Indexer:
         )
         items = [item for item, reason in selected_item_pairs if not reason]
         skipped_items = [(item, reason) for item, reason in selected_item_pairs if reason]
+        formula_scope_doc_ids = [item.item_key for item in items]
+        formula_scope_chunk_type_counts_before = _count_formula_scope_chunk_types(
+            self.store,
+            formula_scope_doc_ids,
+        )
 
         from .feature_extraction.formula_ocr import count_formula_provider_calls
 
@@ -3097,6 +3131,14 @@ class Indexer:
         status_counts = _formula_write_status_counts(results)
         route_counts = _formula_write_route_counts(results)
         write_report = _formula_write_report_rows(results)
+        formula_scope_chunk_type_counts_after = _count_formula_scope_chunk_types(
+            self.store,
+            formula_scope_doc_ids,
+        )
+        formula_scope_chunk_type_count_delta = _chunk_type_count_delta(
+            formula_scope_chunk_type_counts_before,
+            formula_scope_chunk_type_counts_after,
+        )
         result = {
             "run_id": run_id,
             "provider": provider_name,
@@ -3112,6 +3154,10 @@ class Indexer:
             "formula_write_status_counts": status_counts,
             "formula_write_route_counts": route_counts,
             "formula_write_report": write_report,
+            "formula_scope_doc_ids": formula_scope_doc_ids,
+            "formula_scope_chunk_type_counts_before": formula_scope_chunk_type_counts_before,
+            "formula_scope_chunk_type_counts_after": formula_scope_chunk_type_counts_after,
+            "formula_scope_chunk_type_count_delta": formula_scope_chunk_type_count_delta,
             "write_ready": write_ready,
             "write_blocked": write_blocked,
             "write_review_required": write_review_required,
@@ -3166,6 +3212,16 @@ class Indexer:
                 "formula_write_status_counts": result["formula_write_status_counts"],
                 "formula_write_route_counts": result["formula_write_route_counts"],
                 "formula_write_report": result["formula_write_report"],
+                "formula_scope_doc_ids": result["formula_scope_doc_ids"],
+                "formula_scope_chunk_type_counts_before": result[
+                    "formula_scope_chunk_type_counts_before"
+                ],
+                "formula_scope_chunk_type_counts_after": result[
+                    "formula_scope_chunk_type_counts_after"
+                ],
+                "formula_scope_chunk_type_count_delta": result[
+                    "formula_scope_chunk_type_count_delta"
+                ],
                 "write_ready": result["write_ready"],
                 "write_blocked": result["write_blocked"],
                 "write_review_required": result["write_review_required"],
