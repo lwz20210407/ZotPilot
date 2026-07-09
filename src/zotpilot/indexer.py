@@ -2302,6 +2302,70 @@ def _count_formula_scope_chunk_types(store, doc_ids: list[str]) -> dict[str, int
     return normalized
 
 
+def _count_formula_scope_chunk_types_by_doc(
+    store,
+    doc_ids: list[str],
+) -> dict[str, dict[str, int]]:
+    """Return best-effort chunk-type counts grouped by formula-scope doc_id."""
+    ordered_doc_ids = list(
+        dict.fromkeys(doc_id for doc_id in doc_ids if isinstance(doc_id, str) and doc_id)
+    )
+    if not ordered_doc_ids:
+        return {}
+    counter = getattr(store, "count_chunk_types_by_doc", None)
+    if callable(counter):
+        try:
+            counts_by_doc = counter(set(ordered_doc_ids))
+        except Exception:
+            counts_by_doc = None
+        if isinstance(counts_by_doc, dict):
+            normalized = _normalize_chunk_type_counts_by_doc(counts_by_doc)
+            if normalized:
+                return {
+                    doc_id: normalized.get(
+                        doc_id,
+                        {"text": 0, "table": 0, "figure": 0, "formula": 0},
+                    )
+                    for doc_id in ordered_doc_ids
+                }
+    fallback_counts: dict[str, dict[str, int]] = {}
+    for doc_id in ordered_doc_ids:
+        counts = _count_formula_scope_chunk_types(store, [doc_id])
+        fallback_counts[doc_id] = {
+            chunk_type: int(counts.get(chunk_type, 0) or 0)
+            for chunk_type in ("text", "table", "figure", "formula")
+        }
+    return fallback_counts
+
+
+def _normalize_chunk_type_counts_by_doc(
+    counts_by_doc: dict,
+) -> dict[str, dict[str, int]]:
+    """Normalize doc-level chunk type counts returned by a store implementation."""
+    normalized: dict[str, dict[str, int]] = {}
+    for doc_id, counts in counts_by_doc.items():
+        if not isinstance(doc_id, str) or not isinstance(counts, dict):
+            continue
+        normalized[doc_id] = {
+            chunk_type: int(counts.get(chunk_type, 0) or 0)
+            for chunk_type in ("text", "table", "figure", "formula")
+        }
+    return normalized
+
+
+def _aggregate_chunk_type_counts_by_doc(
+    counts_by_doc: dict[str, dict[str, int]],
+) -> dict[str, int]:
+    """Aggregate per-doc chunk type counts into a batch total."""
+    if not counts_by_doc:
+        return {}
+    totals = {"text": 0, "table": 0, "figure": 0, "formula": 0}
+    for counts in counts_by_doc.values():
+        for chunk_type in totals:
+            totals[chunk_type] += int(counts.get(chunk_type, 0) or 0)
+    return totals
+
+
 def _chunk_type_count_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
     """Return stable chunk-type deltas for formula write audit reports."""
     if not before and not after:
@@ -2311,12 +2375,42 @@ def _chunk_type_count_delta(before: dict[str, int], after: dict[str, int]) -> di
     return {key: int(after.get(key, 0)) - int(before.get(key, 0)) for key in keys}
 
 
+def _chunk_type_count_delta_by_doc(
+    before_by_doc: dict[str, dict[str, int]],
+    after_by_doc: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    """Return stable per-doc chunk-type deltas for formula write audit reports."""
+    doc_ids = [
+        doc_id
+        for doc_id in dict.fromkeys([*before_by_doc.keys(), *after_by_doc.keys()])
+        if isinstance(doc_id, str)
+    ]
+    return {
+        doc_id: _chunk_type_count_delta(
+            before_by_doc.get(doc_id, {}),
+            after_by_doc.get(doc_id, {}),
+        )
+        for doc_id in doc_ids
+    }
+
+
 def _non_formula_chunk_type_deltas(delta: dict[str, int]) -> dict[str, int]:
     """Return text/table/figure deltas that must stay zero during formula writes."""
     return {
         chunk_type: value
         for chunk_type in ("text", "table", "figure")
         if (value := int(delta.get(chunk_type, 0))) != 0
+    }
+
+
+def _non_formula_chunk_type_deltas_by_doc(
+    delta_by_doc: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    """Return non-zero text/table/figure deltas grouped by doc_id."""
+    return {
+        doc_id: non_formula_delta
+        for doc_id, delta in delta_by_doc.items()
+        if (non_formula_delta := _non_formula_chunk_type_deltas(delta))
     }
 
 
@@ -2651,10 +2745,17 @@ class Indexer:
         )
         items = [item for item, reason in selected_item_pairs if not reason]
         skipped_items = [(item, reason) for item, reason in selected_item_pairs if reason]
-        formula_scope_doc_ids = [item.item_key for item in items]
-        formula_scope_chunk_type_counts_before = _count_formula_scope_chunk_types(
+        formula_scope_doc_ids = [
+            item.item_key
+            for item in items
+            if isinstance(item.item_key, str) and item.item_key
+        ]
+        formula_scope_chunk_type_counts_by_doc_before = _count_formula_scope_chunk_types_by_doc(
             self.store,
             formula_scope_doc_ids,
+        )
+        formula_scope_chunk_type_counts_before = _aggregate_chunk_type_counts_by_doc(
+            formula_scope_chunk_type_counts_by_doc_before
         )
 
         from .feature_extraction.formula_ocr import count_formula_provider_calls
@@ -3122,17 +3223,32 @@ class Indexer:
         status_counts = _formula_write_status_counts(results)
         route_counts = _formula_write_route_counts(results)
         write_report = _formula_write_report_rows(results)
-        formula_scope_chunk_type_counts_after = _count_formula_scope_chunk_types(
+        formula_scope_chunk_type_counts_by_doc_after = _count_formula_scope_chunk_types_by_doc(
             self.store,
             formula_scope_doc_ids,
+        )
+        formula_scope_chunk_type_counts_after = _aggregate_chunk_type_counts_by_doc(
+            formula_scope_chunk_type_counts_by_doc_after
         )
         formula_scope_chunk_type_count_delta = _chunk_type_count_delta(
             formula_scope_chunk_type_counts_before,
             formula_scope_chunk_type_counts_after,
         )
+        formula_scope_chunk_type_count_delta_by_doc = _chunk_type_count_delta_by_doc(
+            formula_scope_chunk_type_counts_by_doc_before,
+            formula_scope_chunk_type_counts_by_doc_after,
+        )
         formula_scope_non_formula_chunk_deltas = _non_formula_chunk_type_deltas(
             formula_scope_chunk_type_count_delta
         )
+        formula_scope_non_formula_chunk_deltas_by_doc = _non_formula_chunk_type_deltas_by_doc(
+            formula_scope_chunk_type_count_delta_by_doc
+        )
+        formula_scope_non_formula_chunk_changed_doc_ids = [
+            doc_id
+            for doc_id in formula_scope_doc_ids
+            if doc_id in formula_scope_non_formula_chunk_deltas_by_doc
+        ]
         formula_scope_non_formula_chunk_change = bool(formula_scope_non_formula_chunk_deltas)
         write_block_reasons: list[str] = []
         if formula_scope_non_formula_chunk_change:
@@ -3179,8 +3295,23 @@ class Indexer:
             "formula_scope_chunk_type_counts_before": formula_scope_chunk_type_counts_before,
             "formula_scope_chunk_type_counts_after": formula_scope_chunk_type_counts_after,
             "formula_scope_chunk_type_count_delta": formula_scope_chunk_type_count_delta,
+            "formula_scope_chunk_type_counts_by_doc_before": (
+                formula_scope_chunk_type_counts_by_doc_before
+            ),
+            "formula_scope_chunk_type_counts_by_doc_after": (
+                formula_scope_chunk_type_counts_by_doc_after
+            ),
+            "formula_scope_chunk_type_count_delta_by_doc": (
+                formula_scope_chunk_type_count_delta_by_doc
+            ),
             "formula_scope_non_formula_chunk_change": formula_scope_non_formula_chunk_change,
             "formula_scope_non_formula_chunk_deltas": formula_scope_non_formula_chunk_deltas,
+            "formula_scope_non_formula_chunk_deltas_by_doc": (
+                formula_scope_non_formula_chunk_deltas_by_doc
+            ),
+            "formula_scope_non_formula_chunk_changed_doc_ids": (
+                formula_scope_non_formula_chunk_changed_doc_ids
+            ),
             "write_ready": write_ready,
             "write_blocked": write_blocked,
             "write_review_required": write_review_required,
@@ -3245,11 +3376,26 @@ class Indexer:
                 "formula_scope_chunk_type_count_delta": result[
                     "formula_scope_chunk_type_count_delta"
                 ],
+                "formula_scope_chunk_type_counts_by_doc_before": result[
+                    "formula_scope_chunk_type_counts_by_doc_before"
+                ],
+                "formula_scope_chunk_type_counts_by_doc_after": result[
+                    "formula_scope_chunk_type_counts_by_doc_after"
+                ],
+                "formula_scope_chunk_type_count_delta_by_doc": result[
+                    "formula_scope_chunk_type_count_delta_by_doc"
+                ],
                 "formula_scope_non_formula_chunk_change": result[
                     "formula_scope_non_formula_chunk_change"
                 ],
                 "formula_scope_non_formula_chunk_deltas": result[
                     "formula_scope_non_formula_chunk_deltas"
+                ],
+                "formula_scope_non_formula_chunk_deltas_by_doc": result[
+                    "formula_scope_non_formula_chunk_deltas_by_doc"
+                ],
+                "formula_scope_non_formula_chunk_changed_doc_ids": result[
+                    "formula_scope_non_formula_chunk_changed_doc_ids"
                 ],
                 "write_ready": result["write_ready"],
                 "write_blocked": result["write_blocked"],

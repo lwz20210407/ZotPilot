@@ -63,6 +63,10 @@ def test_formula_incremental_add_and_replace_preserves_existing_chunks(
         "figure": 1,
         "formula": 0,
     }
+    assert store.count_chunk_types_by_doc({doc_id, "MISSING"}) == {
+        doc_id: {"text": 3, "table": 1, "figure": 1, "formula": 0},
+        "MISSING": {"text": 0, "table": 0, "figure": 0, "formula": 0},
+    }
 
     added = store.add_new_formulas(
         doc_id,
@@ -97,6 +101,9 @@ def test_formula_incremental_add_and_replace_preserves_existing_chunks(
         "table": 1,
         "figure": 1,
         "formula": 2,
+    }
+    assert store.count_chunk_types_by_doc({doc_id}) == {
+        doc_id: {"text": 3, "table": 1, "figure": 1, "formula": 2},
     }
 
     added_again = store.add_new_formulas(

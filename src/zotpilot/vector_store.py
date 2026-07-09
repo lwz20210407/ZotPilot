@@ -719,6 +719,34 @@ class VectorStore:
                 counts["formula"] += 1
         return counts
 
+    def count_chunk_types_by_doc(self, doc_ids: set[str]) -> dict[str, dict[str, int]]:
+        """Exact chunk-type counts grouped by logical document ID.
+
+        This scans Chroma IDs once and groups by doc_id, so formula write audits
+        can pinpoint which document changed without running one full scan per
+        document.
+        """
+        counts = {
+            doc_id: {"text": 0, "table": 0, "figure": 0, "formula": 0}
+            for doc_id in doc_ids
+        }
+        if not doc_ids:
+            return counts
+        results = self.collection.get(include=[])  # IDs only
+        for chunk_id in results.get("ids") or []:
+            doc_id = self._doc_id_from_chunk_id(chunk_id)
+            if doc_id not in counts:
+                continue
+            if "_chunk_" in chunk_id:
+                counts[doc_id]["text"] += 1
+            elif "_table_" in chunk_id:
+                counts[doc_id]["table"] += 1
+            elif "_fig_" in chunk_id:
+                counts[doc_id]["figure"] += 1
+            elif "_formula_" in chunk_id:
+                counts[doc_id]["formula"] += 1
+        return counts
+
     def get_document_meta(self, doc_id: str) -> dict | None:
         """Get metadata for a document's first chunk.
 
