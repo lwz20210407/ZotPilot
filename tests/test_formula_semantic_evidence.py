@@ -26,10 +26,13 @@ def test_extract_equation_references_ignores_non_equation_numbers_in_marker_wind
     assert extract_equation_references("The projectile is defined by formula (3.2), diameter (7.62m).") == [
         "(3.2)"
     ]
+    assert extract_equation_references("The fitted range is (0.4-0.6) for this condition.") == []
     assert extract_equation_references("代入式（4-8）即可得到 m 值，试样尺寸为 (0.5) mm。") == ["(4-8)"]
     assert extract_equation_references("将拟合得到的系数代入公式（4-4），材料编号 (316) 不应视为公式。") == [
         "(4-4)"
     ]
+    assert extract_equation_references("铺层方式0、方式1、方式2、方式3和方式4均不是公式编号。") == []
+    assert extract_equation_references("这种形式(1)和计算模式(2)不应视为公式。") == []
 
 
 def test_extract_equation_references_keeps_connected_equation_lists():

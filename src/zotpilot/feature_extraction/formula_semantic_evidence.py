@@ -43,15 +43,16 @@ _FORMULA_SIGNAL_RE = re.compile(
 
 _FORMULA_RELATION_RE = re.compile(r"(?:=|≤|≥|≈|∝|<|>|\\leq|\\geq|\\approx|\\sim)", re.IGNORECASE)
 _TEX_COMMAND_RE = re.compile(r"\\(?:frac|sum|int|sqrt|partial|dot|bar|tilde|hat|begin|end)\b")
+_CJK_EQUATION_MARKER = r"(?:公式|方程|(?<!方)(?<!形)(?<!模)(?<!格)(?<!样)(?<!范)式)"
 _EXPLICIT_REF_WINDOW_RE = re.compile(
-    r"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|公式|方程|式)\s*[:：]?\s*.{0,140}",
+    rf"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*[:：]?\s*.{{0,140}}",
     re.IGNORECASE,
 )
 _PAREN_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)", re.IGNORECASE)
 _EXPLICIT_MARKER_NUMBER_RE = re.compile(
-    r"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|公式|方程|式)\s*"
-    r"(?:[\(:：]\s*)?"
-    r"([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
+    rf"(?:\b(?:eqs?|equations?|formulae?|formulas?)\.?|{_CJK_EQUATION_MARKER})\s*"
+    rf"(?:[\(:：]\s*)?"
+    rf"([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)",
     re.IGNORECASE,
 )
 _TRAILING_NUMBER_RE = re.compile(r"\(\s*([0-9]+(?:[.\-_][0-9]+)*(?:[a-z])?)\s*\)\s*$", re.IGNORECASE)
@@ -74,7 +75,11 @@ def _looks_like_citation_year_number(value: str) -> bool:
 def _looks_like_measurement_or_unit_number(value: str) -> bool:
     """Return True for parenthetical values such as ``(7.62m)`` or ``(0.5)``."""
     normalized = normalize_equation_number(value)
+    if normalized == "0":
+        return True
     if re.fullmatch(r"\d+(?:[.-]\d+)+[a-z]", normalized):
+        return True
+    if re.fullmatch(r"0[.-]\d+(?:[-.]0[.-]\d+)+(?:[a-z])?", normalized):
         return True
     return bool(re.fullmatch(r"0[.-]\d+(?:[a-z])?", normalized))
 
@@ -281,14 +286,14 @@ def summarize_formula_semantic_evidence(
                 reference_numbers.append(format_equation_number(normalized_number))
 
     unmatched = [
-        format_equation_number(number)
-        for number in seen_references
-        if number not in candidate_match_numbers
+        display_number
+        for display_number in reference_numbers
+        if normalize_equation_number(display_number) not in candidate_match_numbers
     ]
     matched = [
-        format_equation_number(number)
-        for number in seen_references
-        if number in candidate_match_numbers
+        display_number
+        for display_number in reference_numbers
+        if normalize_equation_number(display_number) in candidate_match_numbers
     ]
     return {
         "source": "zotpilot_chroma_chunks",
