@@ -357,7 +357,7 @@ def test_index_formulas_isolated_batch_routes_quality_before_writing(
     assert report_by_key["GAP1"]["recommended_review_mode"] == "candidate_numbering_review"
     assert report_by_key["GAP1"]["review_reasons"] == ["missing_equation_number_gap"]
     assert report_by_key["SEM1"]["route"] == "review_queue"
-    assert report_by_key["SEM1"]["recommended_review_mode"] == "semantic_formula_evidence_review"
+    assert report_by_key["SEM1"]["recommended_review_mode"] == "semantic_missing_candidate_repair"
     assert report_by_key["SEM1"]["semantic_evidence_count"] >= 1
     assert report_by_key["SEM1"]["semantic_unmatched_reference_count"] == 1
     assert report_by_key["SEM1"]["semantic_unmatched_reference_numbers"] == ["(3)"]

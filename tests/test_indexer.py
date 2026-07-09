@@ -446,7 +446,7 @@ class TestFormulaBackfill:
             "semantic_no_candidate_reference_overlap",
         ]
         assert row["recommended_review"] == {
-            "mode": "semantic_formula_evidence_review",
+            "mode": "semantic_missing_candidate_repair",
             "reason": "semantic_evidence_unmatched_equation_references",
             "item_key": "DOC1",
             "cli_args": [
@@ -454,6 +454,7 @@ class TestFormulaBackfill:
                 "--item-key",
                 "DOC1",
                 "--cache-pdf-number-enrichment",
+                "--append-missing-pdf-number-candidates",
                 "--preview-all-candidates",
                 "--json",
             ],
@@ -461,6 +462,7 @@ class TestFormulaBackfill:
             "writes_index": False,
             "uses_external_ocr": False,
             "evidence_source": "zotpilot_chroma_chunks",
+            "repair_strategy": "append missing numbered PDF candidates in read-only estimate first",
         }
         assert result["semantic_formula_evidence_papers"][0]["unmatched_reference_numbers"] == ["(3)"]
         assert result["semantic_formula_evidence_papers"][0]["reference_match_status"] == "no_match"
@@ -3845,7 +3847,7 @@ class TestFormulaBackfill:
             "semantic_no_candidate_reference_overlap",
         ]
         assert blocking_row["recommended_review"] == {
-            "mode": "semantic_formula_evidence_review",
+            "mode": "semantic_missing_candidate_repair",
             "reason": "semantic_evidence_unmatched_equation_references",
             "item_key": "DOC1",
             "cli_args": [
@@ -3853,6 +3855,7 @@ class TestFormulaBackfill:
                 "--item-key",
                 "DOC1",
                 "--cache-pdf-number-enrichment",
+                "--append-missing-pdf-number-candidates",
                 "--preview-all-candidates",
                 "--json",
             ],
@@ -3860,6 +3863,7 @@ class TestFormulaBackfill:
             "writes_index": False,
             "uses_external_ocr": False,
             "evidence_source": "zotpilot_chroma_chunks",
+            "repair_strategy": "append missing numbered PDF candidates in read-only estimate first",
         }
         assert result["formula_review_summary"][0]["item_key"] == "DOC1"
         assert result["formula_review_summary"][0]["priority"] == 10
@@ -3871,9 +3875,7 @@ class TestFormulaBackfill:
             "semantic_unmatched_references",
             "semantic_no_candidate_reference_overlap",
         ]
-        assert result["formula_review_summary"][0]["recommended_review_mode"] == (
-            "semantic_formula_evidence_review"
-        )
+        assert result["formula_review_summary"][0]["recommended_review_mode"] == "semantic_missing_candidate_repair"
 
     def test_estimate_formula_backfill_reports_readonly_index_change(self, tmp_path):
         from zotpilot.indexer import Indexer

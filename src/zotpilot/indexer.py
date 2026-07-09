@@ -1439,14 +1439,14 @@ def _formula_candidate_numbering_review(
     }
 
 
-def _formula_semantic_evidence_review(
+def _formula_semantic_missing_candidate_repair(
     *,
     item_key: str,
     reason: str,
 ) -> dict[str, object]:
-    """Build a read-only hint for semantic-evidence/candidate mismatches."""
+    """Build a read-only hint to test whether semantic gaps can be repaired."""
     return {
-        "mode": "semantic_formula_evidence_review",
+        "mode": "semantic_missing_candidate_repair",
         "reason": reason,
         "item_key": item_key,
         "cli_args": [
@@ -1454,6 +1454,7 @@ def _formula_semantic_evidence_review(
             "--item-key",
             item_key,
             "--cache-pdf-number-enrichment",
+            "--append-missing-pdf-number-candidates",
             "--preview-all-candidates",
             "--json",
         ],
@@ -1461,6 +1462,7 @@ def _formula_semantic_evidence_review(
         "writes_index": False,
         "uses_external_ocr": False,
         "evidence_source": "zotpilot_chroma_chunks",
+        "repair_strategy": "append missing numbered PDF candidates in read-only estimate first",
     }
 
 
@@ -1545,6 +1547,11 @@ def _formula_candidate_quality_recommended_review(
             item_key=item_key,
             reason="cached_latex_low_quality",
         )
+    if _SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES in review_reasons:
+        return _formula_semantic_missing_candidate_repair(
+            item_key=item_key,
+            reason=_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES,
+        )
     numbering_reasons = [
         reason for reason in review_reasons
         if reason in _NUMBERING_CANDIDATE_REVIEW_WARNINGS
@@ -1553,11 +1560,6 @@ def _formula_candidate_quality_recommended_review(
         return _formula_candidate_numbering_review(
             item_key=item_key,
             reason=numbering_reasons[0],
-        )
-    if _SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES in review_reasons:
-        return _formula_semantic_evidence_review(
-            item_key=item_key,
-            reason=_SEMANTIC_EVIDENCE_UNMATCHED_REFERENCES,
         )
     return None
 
