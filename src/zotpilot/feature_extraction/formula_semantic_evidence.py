@@ -66,6 +66,14 @@ _DOI_OR_REFERENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _REFERENCE_LIST_CONNECTOR_RE = re.compile(r"(?:[-~～至到、,，;；和]|and|to)\s*$", re.IGNORECASE)
+_EXTERNAL_EQUATION_SOURCE_CONTEXT_RE = re.compile(
+    r"(?:"
+    r"\b(?:section|chapter)\s+\d+(?:[.\-]\d+)+\s+of\s+"
+    r"[A-Z][A-Za-z]+(?:\s+(?:and|&)\s+[A-Z][A-Za-z]+)+|"
+    r"\b(?:in|from)\s+[A-Z][A-Za-z]+(?:\s+(?:and|&)\s+[A-Z][A-Za-z]+)+"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _looks_like_citation_year_number(value: str) -> bool:
@@ -88,6 +96,14 @@ def _looks_like_measurement_or_unit_number(value: str) -> bool:
     if re.fullmatch(r"0[.-]\d+(?:[-.]0[.-]\d+)+(?:[a-z])?", normalized):
         return True
     return bool(re.fullmatch(r"0[.-]\d+(?:[a-z])?", normalized))
+
+
+def _looks_like_external_source_equation_reference(raw: str, context: str) -> bool:
+    """Return True for source-book equation IDs used only as external references."""
+    normalized = normalize_equation_number(raw)
+    if not re.fullmatch(r"\d+(?:[.-]\d+){2,}(?:[a-z])?", normalized):
+        return False
+    return bool(_EXTERNAL_EQUATION_SOURCE_CONTEXT_RE.search(context or ""))
 
 
 def _explicit_reference_continuation(prefix: str) -> bool:
@@ -185,11 +201,13 @@ def extract_equation_references(text: str) -> list[str]:
     seen: set[str] = set()
     numbers: list[str] = []
 
-    def add(raw: str) -> None:
+    def add(raw: str, *, context: str = "") -> None:
         number = normalize_equation_number(raw)
         if _looks_like_citation_year_number(number):
             return
         if _looks_like_measurement_or_unit_number(number):
+            return
+        if _looks_like_external_source_equation_reference(number, context):
             return
         if number and number not in seen:
             seen.add(number)
@@ -197,6 +215,9 @@ def extract_equation_references(text: str) -> list[str]:
 
     for window_match in _EXPLICIT_REF_WINDOW_RE.finditer(normalized_text):
         window = window_match.group(0)
+        context = normalized_text[
+            max(0, window_match.start() - 900): min(len(normalized_text), window_match.end() + 180)
+        ]
         window_numbers: list[tuple[int, str]] = []
         explicit_positions: set[int] = set()
         for match in _EXPLICIT_MARKER_NUMBER_RE.finditer(window):
@@ -214,11 +235,11 @@ def extract_equation_references(text: str) -> list[str]:
                 continue
             window_numbers.append((match.start(1), match.group(1)))
         for _position, raw_number in sorted(window_numbers):
-            add(raw_number)
+            add(raw_number, context=context)
 
     trailing = _TRAILING_NUMBER_RE.search(normalized_text)
     if trailing and _FORMULA_SIGNAL_RE.search(normalized_text):
-        add(trailing.group(1))
+        add(trailing.group(1), context=normalized_text[max(0, trailing.start() - 220): trailing.end()])
 
     return numbers
 

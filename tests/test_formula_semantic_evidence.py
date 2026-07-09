@@ -74,6 +74,20 @@ def test_extract_equation_references_normalizes_pdf_private_use_minus_numbers():
     assert extract_equation_references(text) == ["(2-23)", "(2-24)", "(2-22)"]
 
 
+def test_extract_equation_references_ignores_external_source_chapter_equations():
+    assert extract_equation_references(
+        "Starting from Section 9.1 of Green and Zerna we define variables as "
+        "(Eqs. (6.9.1) and (6.9.2))."
+    ) == []
+    assert extract_equation_references(
+        "Evaluating the stress leads to Eqs. (9.1.16) and (9.1.17) "
+        "in Green and Zerna."
+    ) == []
+    assert extract_equation_references(
+        "The update follows Eqs. (4.3.47-4.3.51) and Eq. (4-9)."
+    ) == ["(4.3.47-4.3.51)", "(4-9)"]
+
+
 def test_formula_semantic_evidence_summary_flags_unmatched_references():
     chunks = [
         StoredChunk(
