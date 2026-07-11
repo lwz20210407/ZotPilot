@@ -3349,6 +3349,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Include up to N candidate previews per parser; default -1 includes all candidates",
     )
     sub_formula_compare.add_argument(
+        "--preview-all-candidates",
+        action="store_true",
+        help="Include every candidate preview in each parser estimate",
+    )
+    sub_formula_compare.add_argument(
         "--preview-chars",
         type=int,
         default=160,

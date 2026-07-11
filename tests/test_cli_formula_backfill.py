@@ -2794,6 +2794,7 @@ def test_compare_formula_parsers_cli_can_run_candidate_provider_estimates(capsys
                 "F:/parser-cache",
                 "--item-key",
                 "DOC1",
+                "--preview-all-candidates",
                 "--json",
             ]
         )
