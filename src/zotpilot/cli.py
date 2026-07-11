@@ -76,6 +76,32 @@ def _with_formula_pdf_number_options(
     return config
 
 
+def _with_formula_candidate_provider_options(
+    config,
+    *,
+    candidate_provider: str | None,
+    candidate_cache_dirs: str | None,
+):
+    """Return a runtime-only config with read-only formula candidate provider overrides."""
+    if not candidate_provider and candidate_cache_dirs is None:
+        return config
+    provider = candidate_provider or getattr(config, "formula_candidate_provider", "auto")
+    cache_dirs = (
+        candidate_cache_dirs
+        if candidate_cache_dirs is not None
+        else getattr(config, "formula_candidate_cache_dirs", "")
+    )
+    if dataclasses.is_dataclass(config):
+        return dataclasses.replace(
+            config,
+            formula_candidate_provider=provider,
+            formula_candidate_cache_dirs=cache_dirs,
+        )
+    setattr(config, "formula_candidate_provider", provider)
+    setattr(config, "formula_candidate_cache_dirs", cache_dirs)
+    return config
+
+
 def _parse_item_key_text(text: str) -> list[str]:
     """Parse Zotero item keys from JSON-list or plain text input."""
     stripped = text.strip()
@@ -1527,10 +1553,14 @@ def cmd_index_formulas(args):
 
 def _formula_estimate_config_from_args(args):
     """Resolve formula-estimate config while allowing read-only SimpleTex estimates."""
-    config = _with_formula_pdf_number_options(
-        resolve_runtime_config(args.config),
-        cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
-        append_missing_pdf_number_candidates=getattr(args, "append_missing_pdf_number_candidates", False),
+    config = _with_formula_candidate_provider_options(
+        _with_formula_pdf_number_options(
+            resolve_runtime_config(args.config),
+            cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
+            append_missing_pdf_number_candidates=getattr(args, "append_missing_pdf_number_candidates", False),
+        ),
+        candidate_provider=getattr(args, "candidate_provider", None),
+        candidate_cache_dirs=getattr(args, "candidate_cache_dirs", None),
     )
     errors = config.validate()
     blocking_errors = [
@@ -2904,6 +2934,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Read excluded Zotero item keys from a text or JSON file for --sample-size validation",
     )
     sub_formula_estimate.add_argument(
+        "--candidate-provider",
+        type=str,
+        default=None,
+        help="Temporarily override formula_candidate_provider for this read-only estimate",
+    )
+    sub_formula_estimate.add_argument(
+        "--candidate-cache-dirs",
+        type=str,
+        default=None,
+        help="Temporarily override formula_candidate_cache_dirs for this read-only estimate",
+    )
+    sub_formula_estimate.add_argument(
         "--resume-after",
         type=str,
         default=None,
@@ -3030,6 +3072,18 @@ def main(argv: list[str] | None = None) -> int:
         type=str,
         default=None,
         help="Read excluded Zotero item keys from a text or JSON file for --sample-size validation",
+    )
+    sub_formula_audit.add_argument(
+        "--candidate-provider",
+        type=str,
+        default=None,
+        help="Temporarily override formula_candidate_provider for this read-only audit",
+    )
+    sub_formula_audit.add_argument(
+        "--candidate-cache-dirs",
+        type=str,
+        default=None,
+        help="Temporarily override formula_candidate_cache_dirs for this read-only audit",
     )
     sub_formula_audit.add_argument("--resume-after", type=str, default=None, help="Resume audit after this item key")
     sub_formula_audit.add_argument(

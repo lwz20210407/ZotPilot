@@ -376,6 +376,68 @@ def test_estimate_formula_backfill_cli_forwards_include_high_density(capsys):
     assert indexer.estimate_formula_backfill.call_args.kwargs["include_high_density"] is True
 
 
+def test_estimate_formula_backfill_cli_applies_candidate_provider_override(capsys):
+    from zotpilot.cli import cmd_estimate_formula_backfill
+
+    config = MagicMock()
+    config.validate.return_value = []
+    indexer = MagicMock()
+    indexer.estimate_formula_backfill.return_value = {
+        "provider": "local",
+        "candidate_provider": "pdf_extract_kit_json",
+        "processed": 1,
+        "candidate_count": 1,
+        "average_candidates_per_paper": 1.0,
+        "estimated_provider_calls": 0,
+        "estimated_external_calls": 0,
+        "estimated_min_duration": "0s",
+        "daily_call_budget": 0,
+        "estimated_runs": 1,
+        "data_egress": False,
+        "summary": {"next_action": "Review estimate.", "warnings": []},
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer) as estimate_factory,
+    ):
+        rc = cmd_estimate_formula_backfill(
+            SimpleNamespace(
+                config="config.json",
+                item_key="DOC1",
+                item_keys=None,
+                limit=None,
+                resume_after=None,
+                daily_call_budget=0,
+                preview_candidates=0,
+                preview_all_candidates=False,
+                preview_chars=160,
+                pdf_fallback_max_pages=None,
+                cache_pdf_number_enrichment=False,
+                append_missing_pdf_number_candidates=False,
+                candidate_provider="pdf_extract_kit_json",
+                candidate_cache_dirs="F:/parser-cache",
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                exclude_item_keys=None,
+                exclude_item_keys_file=None,
+                include_high_density=False,
+                fail_on_candidate_quality_blocked=False,
+                fail_on_unmatched=False,
+                fail_on_readonly_index_changed=False,
+                json=False,
+            )
+        )
+
+    assert rc == 0
+    capsys.readouterr()
+    assert config.formula_candidate_provider == "pdf_extract_kit_json"
+    assert config.formula_candidate_cache_dirs == "F:/parser-cache"
+    estimate_factory.assert_called_once_with(config)
+
+
 def test_estimate_formula_backfill_cli_merges_exclude_key_file(tmp_path, capsys):
     from zotpilot.cli import cmd_estimate_formula_backfill
 
