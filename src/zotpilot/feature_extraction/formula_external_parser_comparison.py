@@ -137,10 +137,15 @@ def _comparison_row(
         int(summary["candidate_count"])
         for summary in parser_summaries.values()
     ]
+    preview_counts = [
+        int(summary["preview_candidate_count"])
+        for summary in parser_summaries.values()
+    ]
     flags = _comparison_flags(
         parser_count=len(parser_summaries),
         expected_parser_count=len(parser_labels),
         candidate_counts=candidate_counts,
+        preview_counts=preview_counts,
         preview_candidate_count=_int_value(consensus.get("preview_candidate_count")),
         consensus=consensus,
     )
@@ -178,6 +183,7 @@ def _comparison_flags(
     parser_count: int,
     expected_parser_count: int,
     candidate_counts: list[int],
+    preview_counts: list[int],
     preview_candidate_count: int,
     consensus: Mapping[str, Any],
 ) -> list[str]:
@@ -188,6 +194,11 @@ def _comparison_flags(
         flags.append("candidate_count_mismatch")
     if sum(candidate_counts) > 0 and preview_candidate_count == 0:
         flags.append("candidate_preview_missing")
+    if any(
+        preview_count < candidate_count
+        for candidate_count, preview_count in zip(candidate_counts, preview_counts, strict=False)
+    ):
+        flags.append("candidate_preview_truncated")
     if _int_value(consensus.get("conflict_cluster_count")):
         flags.append("candidate_consensus_conflicts")
     if (
@@ -211,6 +222,7 @@ def _write_recommendation(
     hard_review_flags = {
         "missing_parser_result",
         "candidate_preview_missing",
+        "candidate_preview_truncated",
         "candidate_consensus_conflicts",
         "no_cross_parser_candidate_overlap",
     }
