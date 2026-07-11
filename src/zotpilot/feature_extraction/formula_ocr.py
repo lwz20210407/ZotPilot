@@ -93,7 +93,7 @@ LATEX_TAG_RE = re.compile(
 NOISE_RE = re.compile(
     r"\b(?:abstract|keywords|introduction|conclusion|conclusions|references|"
     r"acknowledg(?:e)?ments?|figure|fig\.?|table|tab\.?|copyright|doi|"
-    r"received|accepted|available\s+online|corresponding\s+author|"
+    r"received|accepted|published|available\s+online|corresponding\s+author|"
     r"supplementary|publisher|license|creative\s+commons)\b|"
     r"(?:摘要|关键词|引言|前言|结论|参考文献|致谢|图\s*\d+|表\s*\d+|通讯作者|版权)",
     re.IGNORECASE,

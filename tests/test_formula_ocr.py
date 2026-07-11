@@ -2301,6 +2301,7 @@ def test_non_formula_text_rejects_text_layer_table_header_unit_rows():
 
 
 def test_non_formula_text_rejects_garbled_text_layer_headers_and_prose():
+    assert _looks_like_non_formula_text("Published 04/12/2010")
     assert _looks_like_non_formula_text(
         "第 !\" 卷第 # 期 $%%# 年 !$ 月 弹 道 学 报 &’()*+,’-.+,,/01/20 3’,4!\"5’4#"
     )
