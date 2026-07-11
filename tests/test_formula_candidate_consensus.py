@@ -83,3 +83,66 @@ def test_candidate_consensus_flags_number_conflict_on_same_bbox():
     assert "equation_number_conflict" in cluster["conflict_flags"]
     assert "ocr_fallback_required" in cluster["review_flags"]
     assert cluster["candidate_details"][1]["raw_text_preview"] == r"D = 1 - exp(-a epsilon_p)"
+
+
+def test_candidate_consensus_clusters_same_page_latex_and_text_signature():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 3,
+                "source": "mineru_content_list",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\sigma = E\varepsilon",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 3,
+                "source": "text_layer",
+                "equation_number": "",
+                "bbox": [300, 500, 520, 530],
+                "raw_text_preview": "σ = E ε",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["multi_provider_cluster_count"] == 1
+    cluster = consensus["clusters"][0]
+    assert "multi_provider_agreement" in cluster["review_flags"]
+    assert "missing_equation_number" in cluster["review_flags"]
+
+
+def test_candidate_consensus_keeps_different_same_page_formulas_separate():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 3,
+                "source": "mineru_content_list",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\sigma = E\varepsilon",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 3,
+                "source": "text_layer",
+                "equation_number": "",
+                "bbox": [300, 500, 520, 530],
+                "raw_text_preview": "D = 1 - exp(-a epsilon)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["multi_provider_cluster_count"] == 0

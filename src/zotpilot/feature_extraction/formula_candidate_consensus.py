@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from difflib import SequenceMatcher
 from typing import Any
 
 from .formula_semantic_evidence import normalize_equation_number
@@ -24,6 +25,61 @@ _FORMULA_SIGNAL_RE = re.compile(
     r"(?:[=<>≤≥≈∑∫√]|\\(?:frac|sum|int|sqrt|sigma|epsilon|varepsilon|eta|theta)|[α-ωΑ-Ω])",
     re.IGNORECASE,
 )
+_SIGNATURE_GREEK_REPLACEMENTS = {
+    "α": "alpha",
+    "β": "beta",
+    "γ": "gamma",
+    "δ": "delta",
+    "ε": "epsilon",
+    "η": "eta",
+    "θ": "theta",
+    "λ": "lambda",
+    "μ": "mu",
+    "ν": "nu",
+    "ξ": "xi",
+    "π": "pi",
+    "ρ": "rho",
+    "σ": "sigma",
+    "τ": "tau",
+    "φ": "phi",
+    "χ": "chi",
+    "ψ": "psi",
+    "ω": "omega",
+    "Δ": "delta",
+    "∆": "delta",
+    "Σ": "sigma",
+}
+_SIGNATURE_LATEX_REPLACEMENTS = {
+    r"\alpha": "alpha",
+    r"\beta": "beta",
+    r"\gamma": "gamma",
+    r"\delta": "delta",
+    r"\epsilon": "epsilon",
+    r"\varepsilon": "epsilon",
+    r"\eta": "eta",
+    r"\theta": "theta",
+    r"\lambda": "lambda",
+    r"\mu": "mu",
+    r"\nu": "nu",
+    r"\xi": "xi",
+    r"\pi": "pi",
+    r"\rho": "rho",
+    r"\sigma": "sigma",
+    r"\tau": "tau",
+    r"\phi": "phi",
+    r"\chi": "chi",
+    r"\psi": "psi",
+    r"\omega": "omega",
+    r"\Delta": "delta",
+    r"\Sigma": "sigma",
+    r"\cdot": "*",
+    r"\times": "*",
+    r"\leq": "<=",
+    r"\le": "<=",
+    r"\geq": ">=",
+    r"\ge": ">=",
+    r"\approx": "≈",
+}
 
 
 def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -141,6 +197,8 @@ def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -
         left_signature = str(left.get("latex_signature", "") or "")
         right_signature = str(right.get("latex_signature", "") or "")
         if left_signature and right_signature and left_signature == right_signature:
+            return True
+        if _formula_signatures_similar(left_signature, right_signature):
             return True
     return False
 
@@ -267,6 +325,7 @@ def _cluster_review_flags(
 def _formula_signature(value: str) -> str:
     compact = re.sub(r"\s+", "", value or "").lower()
     compact = compact.strip("$")
+    compact = _normalize_formula_signature(compact)
     if len(compact) < 4:
         return ""
     if len(compact) > 320:
@@ -274,6 +333,42 @@ def _formula_signature(value: str) -> str:
     if not _FORMULA_SIGNAL_RE.search(compact):
         return ""
     return compact
+
+
+def _normalize_formula_signature(value: str) -> str:
+    normalized = value or ""
+    replacements = sorted(
+        _SIGNATURE_LATEX_REPLACEMENTS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    for latex, replacement in replacements:
+        normalized = normalized.replace(latex.lower(), replacement)
+    for greek, replacement in _SIGNATURE_GREEK_REPLACEMENTS.items():
+        normalized = normalized.replace(greek, replacement)
+    normalized = re.sub(r"\\(?:left|right|mathrm|mathbf|mathit|text|operatorname)", "", normalized)
+    normalized = normalized.replace("¼", "=").replace("þ", "+").replace("−", "-")
+    return normalized
+
+
+def _formula_signatures_similar(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    left_tokens = _formula_signature_tokens(left)
+    right_tokens = _formula_signature_tokens(right)
+    if len(left_tokens) < 3 or len(right_tokens) < 3:
+        return False
+    overlap = len(set(left_tokens) & set(right_tokens))
+    jaccard = overlap / max(len(set(left_tokens) | set(right_tokens)), 1)
+    if overlap >= 4 and jaccard >= 0.72:
+        return True
+    return SequenceMatcher(None, left, right).ratio() >= 0.86 and jaccard >= 0.58
+
+
+def _formula_signature_tokens(value: str) -> list[str]:
+    return re.findall(r"[a-z]+|\d+|[=<>≤≥≈+\-*/_^{}/]+", value or "")
 
 
 def _bbox_iou(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> float:
