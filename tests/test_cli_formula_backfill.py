@@ -2594,6 +2594,41 @@ def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):
     assert payload["conflict_cluster_count"] == 1
 
 
+def test_compare_formula_parsers_cli_can_fail_on_readonly_index_change(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    first_path.write_text(
+        json.dumps({"candidate_count": 0, "readonly_index_changed": False, "results": []}),
+        encoding="utf-8",
+    )
+    second_path.write_text(
+        json.dumps({"candidate_count": 0, "readonly_index_changed": True, "results": []}),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "compare-formula-parsers",
+            "--estimate",
+            f"first={first_path}",
+            "--estimate",
+            f"second={second_path}",
+            "--fail-on-readonly-index-changed",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 6
+    assert payload["readonly_index_changed"] is True
+    assert payload["readonly_index_changed_by_parser"] == {
+        "first": False,
+        "second": True,
+    }
+
+
 def test_compare_formula_parsers_cli_can_run_candidate_provider_estimates(capsys):
     from zotpilot.cli import main
 

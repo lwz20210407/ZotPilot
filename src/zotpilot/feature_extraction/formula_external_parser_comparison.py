@@ -21,6 +21,15 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
         "mode": "read_only_external_parser_comparison",
         "parser_count": len(estimates),
         "parser_labels": sorted(estimates),
+        "readonly_index_changed": any(bool(estimate.get("readonly_index_changed")) for estimate in estimates.values()),
+        "readonly_index_changed_by_parser": {
+            label: bool(estimate.get("readonly_index_changed"))
+            for label, estimate in sorted(estimates.items())
+        },
+        "request_complete_by_parser": {
+            label: bool(estimate.get("request_complete", True))
+            for label, estimate in sorted(estimates.items())
+        },
         "paper_count": len(rows),
         "candidate_count_by_parser": {
             label: _int_value(estimate.get("candidate_count"))

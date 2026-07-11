@@ -143,3 +143,18 @@ def test_external_parser_comparison_routes_conflicts_to_manual_review():
         "candidate_consensus_conflicts",
     }
     assert row["write_recommendation"] == "manual_review_queue"
+
+
+def test_external_parser_comparison_tracks_readonly_index_change():
+    comparison = build_formula_external_parser_comparison(
+        {
+            "stable": {"candidate_count": 0, "readonly_index_changed": False, "results": []},
+            "changed": {"candidate_count": 0, "readonly_index_changed": True, "results": []},
+        }
+    )
+
+    assert comparison["readonly_index_changed"] is True
+    assert comparison["readonly_index_changed_by_parser"] == {
+        "changed": True,
+        "stable": False,
+    }

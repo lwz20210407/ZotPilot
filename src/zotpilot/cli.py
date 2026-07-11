@@ -1265,6 +1265,7 @@ def _print_formula_parser_comparison(report: dict) -> None:
     print(f"  Parser labels:            {', '.join(report.get('parser_labels', []))}")
     print(f"  Papers:                   {report.get('paper_count', 0)}")
     print(f"  Previewed papers:         {report.get('previewed_paper_count', 0)}")
+    print(f"  Read-only index changed:  {'yes' if report.get('readonly_index_changed') else 'no'}")
     print(f"  Formula clusters:         {report.get('consensus_cluster_count', 0)}")
     print(f"  Multi-provider clusters:  {report.get('multi_provider_cluster_count', 0)}")
     print(f"  Conflict clusters:        {report.get('conflict_cluster_count', 0)}")
@@ -1728,6 +1729,8 @@ def cmd_compare_formula_parsers(args):
         _print_json(comparison, ensure_ascii=False, indent=2)
     else:
         _print_formula_parser_comparison(comparison)
+    if getattr(args, "fail_on_readonly_index_changed", False) and comparison.get("readonly_index_changed"):
+        return 6
     if getattr(args, "fail_on_conflicts", False) and comparison.get("conflict_cluster_count"):
         return 7
     if getattr(args, "fail_on_manual_review", False) and comparison.get("manual_review_paper_count"):
@@ -3345,6 +3348,11 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-manual-review",
         action="store_true",
         help="Return exit code 8 when any paper is routed to manual review",
+    )
+    sub_formula_compare.add_argument(
+        "--fail-on-readonly-index-changed",
+        action="store_true",
+        help="Return exit code 6 when any input estimate reports readonly_index_changed=true",
     )
     sub_formula_compare.add_argument(
         "--output",
