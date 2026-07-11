@@ -160,6 +160,126 @@ def test_candidate_consensus_clusters_same_page_latex_and_text_signature():
     assert "missing_equation_number" in cluster["review_flags"]
 
 
+def test_candidate_consensus_normalizes_math_unicode_text_signatures():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 4,
+                "source": "mineru_content_list",
+                "equation_number": "(1)",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\sigma = E\varepsilon",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 4,
+                "source": "text_layer",
+                "equation_number": "(1)",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "𝜎 = 𝐸𝜀",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_does_not_replace_le_inside_left_command():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 4,
+                "source": "mineru_content_list",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"y=\left(\sigma_1+\sigma_2\right)^{p_*}",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 4,
+                "source": "text_layer",
+                "equation_number": "",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "𝑦=(𝜎_1+𝜎_2)^{𝑝_*}",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_collapses_text_layer_duplicate_math_glyphs():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 9,
+                "source": "mineru_content_list",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"c = \sqrt{\frac{1}{T}\int_0^T(f-g)^2dt}",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 9,
+                "source": "text_layer",
+                "equation_number": "",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "𝑐𝑐 = √{1/𝑇𝑇 ∫_0^𝑇𝑇(𝑓𝑓−𝑔𝑔)^2𝑑𝑑𝑡𝑡}",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_normalizes_symbol_font_private_use_greek():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 16,
+                "source": "mineru_content_list",
+                "equation_number": "(2-2)",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\sigma_m=(\sigma_1+\sigma_2+\sigma_3)/3",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 16,
+                "source": "text_layer",
+                "equation_number": "(2-2)",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "\uf073m=(\uf0731+\uf0732+\uf0733)/3 (2-2)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+
+
 def test_candidate_consensus_keeps_different_same_page_formulas_separate():
     consensus = build_formula_candidate_consensus(
         [

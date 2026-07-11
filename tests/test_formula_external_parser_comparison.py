@@ -82,6 +82,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "preview_candidate_count": 1,
             "quality_route_counts": {"unknown": 1},
             "source_group_counts": {"mineru_cache": 1},
+            "opaque_text_layer_candidate_count": 0,
         },
         "pdf_extract_kit": {
             "paper_count": 1,
@@ -89,6 +90,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "preview_candidate_count": 1,
             "quality_route_counts": {"unknown": 1},
             "source_group_counts": {"pdf_extract_kit": 1},
+            "opaque_text_layer_candidate_count": 0,
         },
     }
     row = comparison["rows"][0]
@@ -257,6 +259,115 @@ def test_external_parser_comparison_routes_count_mismatch_with_overlap_to_partia
     row = comparison["rows"][0]
     assert row["comparison_flags"] == ["candidate_count_mismatch"]
     assert row["write_recommendation"] == "partial_cross_parser_support_review_extras"
+
+
+def test_external_parser_comparison_routes_filtered_empty_parser_to_single_parser_review():
+    structured_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_EMPTY_TEXT",
+                "title": "Filtered text-layer paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 2,
+                        "source": "mineru_content_list",
+                        "equation_number": "(1)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"\sigma = E\varepsilon",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ],
+    }
+    empty_text_estimate = {
+        "candidate_count": 0,
+        "results": [
+            {
+                "item_key": "DOC_EMPTY_TEXT",
+                "title": "Filtered text-layer paper",
+                "candidate_count": 0,
+                "candidate_audit": {"source_counts": {}},
+                "candidate_preview": [],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"auto": structured_estimate, "text": empty_text_estimate}
+    )
+
+    assert comparison["manual_review_paper_count"] == 0
+    assert comparison["review_required_paper_count"] == 1
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["candidate_count_mismatch", "parser_without_candidates"]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+
+
+def test_external_parser_comparison_routes_opaque_text_layer_evidence_separately():
+    structured_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_OPAQUE_TEXT",
+                "title": "Opaque text-layer paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 16,
+                        "source": "mineru_content_list",
+                        "equation_number": "",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"\sigma_m=(\sigma_1+\sigma_2+\sigma_3)/3",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ],
+    }
+    opaque_text_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_OPAQUE_TEXT",
+                "title": "Opaque text-layer paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"text_layer": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 16,
+                        "source": "text_layer",
+                        "equation_number": "(2-2)",
+                        "bbox": [320, 300, 520, 330],
+                        "raw_text_preview": "\uf073 \uf073 \uf073 \uf073 + + = (2-2)",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"auto": structured_estimate, "text": opaque_text_estimate}
+    )
+
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["opaque_text_layer_candidate_evidence"]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+    assert comparison["comparison_flag_counts"] == {"opaque_text_layer_candidate_evidence": 1}
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+    assert row["parser_summaries"]["text"]["opaque_text_layer_candidate_count"] == 1
 
 
 def test_external_parser_comparison_flags_truncated_candidate_previews():

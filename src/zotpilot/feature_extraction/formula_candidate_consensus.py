@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from difflib import SequenceMatcher
@@ -48,6 +49,34 @@ _SIGNATURE_GREEK_REPLACEMENTS = {
     "Δ": "delta",
     "∆": "delta",
     "Σ": "sigma",
+    "\uf061": "alpha",
+    "\uf062": "beta",
+    "\uf063": "chi",
+    "\uf064": "delta",
+    "\uf065": "epsilon",
+    "\uf066": "phi",
+    "\uf067": "gamma",
+    "\uf068": "eta",
+    "\uf069": "iota",
+    "\uf06a": "theta",
+    "\uf06b": "kappa",
+    "\uf06c": "lambda",
+    "\uf06d": "mu",
+    "\uf06e": "nu",
+    "\uf06f": "omicron",
+    "\uf070": "pi",
+    "\uf071": "theta",
+    "\uf072": "rho",
+    "\uf073": "sigma",
+    "\uf074": "tau",
+    "\uf075": "upsilon",
+    "\uf076": "pi",
+    "\uf077": "omega",
+    "\uf078": "xi",
+    "\uf079": "psi",
+    "\uf07a": "zeta",
+    "\uf044": "delta",
+    "\uf053": "sigma",
 }
 _SIGNATURE_LATEX_REPLACEMENTS = {
     r"\alpha": "alpha",
@@ -72,6 +101,12 @@ _SIGNATURE_LATEX_REPLACEMENTS = {
     r"\omega": "omega",
     r"\Delta": "delta",
     r"\Sigma": "sigma",
+    r"\sqrt": "sqrt",
+    r"\sum": "sum",
+    r"\int": "int",
+    r"\dot": "dot",
+    r"\exp": "exp",
+    r"\ln": "ln",
     r"\cdot": "*",
     r"\times": "*",
     r"\leq": "<=",
@@ -80,6 +115,46 @@ _SIGNATURE_LATEX_REPLACEMENTS = {
     r"\ge": ">=",
     r"\approx": "≈",
 }
+_SIGNATURE_SYMBOL_REPLACEMENTS = {
+    "∗": "*",
+    "×": "*",
+    "≤": "<=",
+    "≥": ">=",
+    "∑": "sum",
+    "∫": "int",
+    "√": "sqrt",
+    "ቀ": "(",
+    "ቁ": ")",
+    "൫": "(",
+    "൯": ")",
+}
+_SIGNATURE_DUPLICATE_WORDS = tuple(
+    sorted(
+        {
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "eta",
+            "theta",
+            "lambda",
+            "mu",
+            "nu",
+            "xi",
+            "pi",
+            "rho",
+            "sigma",
+            "tau",
+            "phi",
+            "chi",
+            "psi",
+            "omega",
+        },
+        key=len,
+        reverse=True,
+    )
+)
 
 
 def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -362,7 +437,11 @@ def _cluster_review_flags(
         flags.append("equation_number_conflict")
     if len(normalized_numbers) == 1 and len(page_nums) > 1:
         flags.append("same_number_multiple_pages")
-    if len(signatures) > 1 and len([count for count in group_counts.values() if count]) >= 2:
+    if (
+        len(signatures) > 1
+        and len([count for count in group_counts.values() if count]) >= 2
+        and _formula_signatures_have_conflict(signatures)
+    ):
         flags.append("latex_signature_conflict")
     if any(not int(candidate["page_num"]) for candidate in candidates):
         flags.append("missing_page")
@@ -376,9 +455,9 @@ def _cluster_review_flags(
 
 
 def _formula_signature(value: str) -> str:
-    compact = re.sub(r"\s+", "", value or "").lower()
+    compact = _normalize_formula_signature(value or "")
+    compact = re.sub(r"\s+", "", compact)
     compact = compact.strip("$")
-    compact = _normalize_formula_signature(compact)
     if len(compact) < 4:
         return ""
     if len(compact) > 320:
@@ -389,19 +468,41 @@ def _formula_signature(value: str) -> str:
 
 
 def _normalize_formula_signature(value: str) -> str:
-    normalized = value or ""
+    normalized = unicodedata.normalize("NFKC", value or "").lower()
+    normalized = re.sub(r"\\frac\s*\{\s*([^{}]+?)\s*\}\s*\{\s*([^{}]+?)\s*\}", r"(\1)/(\2)", normalized)
+    normalized = re.sub(r"\\begin\s*\{[^{}]*\}\s*(?:\{\s*[^{}]*\s*\})?", "", normalized)
+    normalized = re.sub(r"\\end\s*\{[^{}]*\}", "", normalized)
+    normalized = re.sub(
+        r"\\(?:left|right|big|bigg|displaystyle|cal|mathrm|mathbf|mathit|text|operatorname)",
+        "",
+        normalized,
+    )
     replacements = sorted(
         _SIGNATURE_LATEX_REPLACEMENTS.items(),
         key=lambda item: len(item[0]),
         reverse=True,
     )
     for latex, replacement in replacements:
-        normalized = normalized.replace(latex.lower(), replacement)
+        normalized = re.sub(rf"{re.escape(latex.lower())}(?![a-z])", replacement, normalized)
     for greek, replacement in _SIGNATURE_GREEK_REPLACEMENTS.items():
         normalized = normalized.replace(greek, replacement)
-    normalized = re.sub(r"\\(?:left|right|mathrm|mathbf|mathit|text|operatorname)", "", normalized)
+    for symbol, replacement in _SIGNATURE_SYMBOL_REPLACEMENTS.items():
+        normalized = normalized.replace(symbol, replacement)
+    normalized = _collapse_text_layer_duplicate_math_tokens(normalized)
+    normalized = re.sub(r"\\[a-z]+", "", normalized)
+    normalized = re.sub(r"[_^]\s*\{\s*([^{}]+?)\s*\}", r"\1", normalized)
+    normalized = re.sub(r"[_^]\s*([a-z0-9*])", r"\1", normalized)
+    normalized = normalized.replace("{", "").replace("}", "")
     normalized = normalized.replace("¼", "=").replace("þ", "+").replace("−", "-")
     return normalized
+
+
+def _collapse_text_layer_duplicate_math_tokens(value: str) -> str:
+    normalized = value
+    for word in _SIGNATURE_DUPLICATE_WORDS:
+        normalized = normalized.replace(f"{word}{word}", word)
+    normalized = re.sub(r"(?<![a-z])([a-z])\1([a-z])\2(?![a-z])", r"\1\2", normalized)
+    return re.sub(r"(?<![a-z])([a-z])\1(?![a-z])", r"\1", normalized)
 
 
 def _formula_signatures_similar(left: str, right: str) -> bool:
@@ -418,6 +519,15 @@ def _formula_signatures_similar(left: str, right: str) -> bool:
     if overlap >= 4 and jaccard >= 0.72:
         return True
     return SequenceMatcher(None, left, right).ratio() >= 0.86 and jaccard >= 0.58
+
+
+def _formula_signatures_have_conflict(signatures: set[str]) -> bool:
+    signature_list = sorted(signature for signature in signatures if signature)
+    for index, left in enumerate(signature_list):
+        for right in signature_list[index + 1 :]:
+            if not _formula_signatures_similar(left, right):
+                return True
+    return False
 
 
 def _formula_signature_tokens(value: str) -> list[str]:

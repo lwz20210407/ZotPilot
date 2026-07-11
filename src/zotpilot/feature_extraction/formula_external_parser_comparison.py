@@ -82,6 +82,7 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
             if row["write_recommendation"] in {
                 "manual_review_queue",
                 "partial_cross_parser_support_review_extras",
+                "single_parser_candidate_review",
             }
         ),
         "comparison_flag_counts": _comparison_flag_counts(rows),
@@ -146,6 +147,10 @@ def _comparison_row(
         expected_parser_count=len(parser_labels),
         candidate_counts=candidate_counts,
         preview_counts=preview_counts,
+        opaque_parser_count=sum(
+            1 for summary in parser_summaries.values()
+            if _parser_summary_has_opaque_text_layer_evidence(summary)
+        ),
         preview_candidate_count=_int_value(consensus.get("preview_candidate_count")),
         consensus=consensus,
     )
@@ -168,13 +173,21 @@ def _comparison_row(
 def _parser_row_summary(row: Mapping[str, Any]) -> dict[str, Any]:
     audit = _dict_value(row.get("candidate_audit"))
     source_counts = _dict_value(audit.get("source_counts"))
+    previews = [
+        preview for preview in _list_value(row.get("candidate_preview"))
+        if isinstance(preview, Mapping)
+    ]
     return {
         "candidate_count": _int_value(row.get("candidate_count")),
         "source_group_counts": dict(sorted(_source_group_counts(source_counts).items())),
         "quality_route": str(row.get("quality_route", "") or ""),
         "status": str(row.get("status", "") or ""),
         "reason": str(row.get("reason", "") or ""),
-        "preview_candidate_count": len(_list_value(row.get("candidate_preview"))),
+        "preview_candidate_count": len(previews),
+        "opaque_text_layer_candidate_count": sum(
+            1 for preview in previews
+            if _looks_like_opaque_text_layer_candidate_preview(preview)
+        ),
     }
 
 
@@ -184,6 +197,7 @@ def _comparison_flags(
     expected_parser_count: int,
     candidate_counts: list[int],
     preview_counts: list[int],
+    opaque_parser_count: int,
     preview_candidate_count: int,
     consensus: Mapping[str, Any],
 ) -> list[str]:
@@ -192,6 +206,8 @@ def _comparison_flags(
         flags.append("missing_parser_result")
     if candidate_counts and max(candidate_counts) != min(candidate_counts):
         flags.append("candidate_count_mismatch")
+    if any(count == 0 for count in candidate_counts) and sum(candidate_counts) > 0:
+        flags.append("parser_without_candidates")
     if sum(candidate_counts) > 0 and preview_candidate_count == 0:
         flags.append("candidate_preview_missing")
     if any(
@@ -203,10 +219,14 @@ def _comparison_flags(
         flags.append("candidate_consensus_conflicts")
     if (
         parser_count >= 2
+        and all(count > 0 for count in candidate_counts)
         and preview_candidate_count > 0
         and _int_value(consensus.get("multi_provider_cluster_count")) == 0
     ):
-        flags.append("no_cross_parser_candidate_overlap")
+        if opaque_parser_count:
+            flags.append("opaque_text_layer_candidate_evidence")
+        else:
+            flags.append("no_cross_parser_candidate_overlap")
     return flags
 
 
@@ -228,6 +248,8 @@ def _write_recommendation(
     }
     if conflict_count > 0 or any(flag in hard_review_flags for flag in flags):
         return "manual_review_queue"
+    if "parser_without_candidates" in flags or "opaque_text_layer_candidate_evidence" in flags:
+        return "single_parser_candidate_review"
     if flags == ["candidate_count_mismatch"] and multi_provider_count > 0:
         return "partial_cross_parser_support_review_extras"
     if flags:
@@ -235,6 +257,28 @@ def _write_recommendation(
     if multi_provider_count > 0:
         return "candidate_supported_by_cross_parser_review"
     return "manual_review_queue"
+
+
+def _parser_summary_has_opaque_text_layer_evidence(summary: Mapping[str, Any]) -> bool:
+    preview_count = _int_value(summary.get("preview_candidate_count"))
+    if preview_count <= 0:
+        return False
+    source_counts = _dict_value(summary.get("source_group_counts"))
+    if set(source_counts) != {"pdf_text_layer"}:
+        return False
+    opaque_count = _int_value(summary.get("opaque_text_layer_candidate_count"))
+    threshold = 1 if preview_count <= 3 else max(5, int(preview_count * 0.25))
+    return opaque_count >= threshold
+
+
+def _looks_like_opaque_text_layer_candidate_preview(preview: Mapping[str, Any]) -> bool:
+    if source_group(str(preview.get("source", "") or "")) != "pdf_text_layer":
+        return False
+    raw_text = str(preview.get("raw_text_preview", "") or "")
+    if not raw_text:
+        return False
+    private_use_count = sum(1 for char in raw_text if "\uf000" <= char <= "\uf8ff")
+    return private_use_count >= 2
 
 
 def _row_map(estimate: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -289,6 +333,7 @@ def _parser_candidate_summary(
         row_count = 0
         candidate_count = 0
         preview_candidate_count = 0
+        opaque_text_layer_candidate_count = 0
         quality_routes: Counter[str] = Counter()
         source_groups: Counter[str] = Counter()
         for row in rows:
@@ -298,6 +343,7 @@ def _parser_candidate_summary(
             row_count += 1
             candidate_count += _int_value(parser_summary.get("candidate_count"))
             preview_candidate_count += _int_value(parser_summary.get("preview_candidate_count"))
+            opaque_text_layer_candidate_count += _int_value(parser_summary.get("opaque_text_layer_candidate_count"))
             quality_route = str(parser_summary.get("quality_route", "") or "unknown")
             quality_routes[quality_route] += 1
             source_groups.update(_dict_value(parser_summary.get("source_group_counts")))
@@ -305,6 +351,7 @@ def _parser_candidate_summary(
             "paper_count": row_count,
             "candidate_count": candidate_count,
             "preview_candidate_count": preview_candidate_count,
+            "opaque_text_layer_candidate_count": opaque_text_layer_candidate_count,
             "quality_route_counts": dict(sorted(quality_routes.items())),
             "source_group_counts": dict(sorted(source_groups.items())),
         }

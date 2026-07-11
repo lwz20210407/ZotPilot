@@ -6459,7 +6459,9 @@ def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
 def _looks_like_text_layer_garbled_or_prose_noise(text: str) -> bool:
     normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
     if len(normalized) < 8:
-        return False
+        return _looks_like_short_punctuation_garbled_text_layer_noise(normalized)
+    if _looks_like_short_punctuation_garbled_text_layer_noise(normalized):
+        return True
     if _has_formula_relation(normalized) or bool(MATH_LATEX_COMMAND_RE.search(normalized)):
         return False
     cjk_chars = len(CJK_CHAR_RE.findall(normalized))
@@ -6478,7 +6480,7 @@ def _looks_like_text_layer_garbled_or_prose_noise(text: str) -> bool:
         and not PDF_EQUATION_NUMBER_TOKEN_RE.search(normalized)
     ):
         return True
-    punctuation_count = len(re.findall(r"[!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~’‘]+", normalized))
+    punctuation_count = len(re.findall(r"[!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~’‘]", normalized))
     alnum_cjk_count = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", normalized))
     if (
         punctuation_count >= 8
@@ -6487,6 +6489,18 @@ def _looks_like_text_layer_garbled_or_prose_noise(text: str) -> bool:
     ):
         return True
     return False
+
+
+def _looks_like_short_punctuation_garbled_text_layer_noise(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    if len(compact) < 4:
+        return False
+    punctuation_count = len(re.findall(r"[!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~’‘]", compact))
+    alnum_cjk_count = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", compact))
+    math_alpha_count = len(re.findall(r"[Α-Ωα-ω∑∏∫√∞∂∇∆]", compact))
+    if math_alpha_count:
+        return False
+    return punctuation_count >= 4 and alnum_cjk_count <= 3 and punctuation_count >= alnum_cjk_count * 2
 
 
 def _looks_like_unlabeled_numeric_matrix_fragment(text: str) -> bool:
