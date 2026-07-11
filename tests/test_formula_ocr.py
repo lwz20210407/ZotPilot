@@ -2227,6 +2227,20 @@ def test_figure_reference_record_rejects_parenthetical_number():
     assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (26)", "(26)")
 
 
+def test_figure_reference_record_rejects_caption_equation_references_with_math_payload():
+    figure_caption = (
+        "Fig. 3. Stress-strain curves predicted by Eq. (1) for specimens "
+        "with σ = 100 MPa and ε = 0.05."
+    )
+    table_caption = "Table 2. Parameters A, B and n calibrated from Eq. (5)."
+    panel_caption = "Fig. 3(a). Curves calculated from Eq. (8a), where α varies with strain."
+
+    assert _looks_like_figure_or_table_reference_record(figure_caption, "(1)")
+    assert _looks_like_figure_or_table_reference_record(table_caption, "(5)")
+    assert _looks_like_figure_or_table_reference_record(panel_caption, "(8a)")
+    assert not _looks_like_figure_or_table_reference_record(r"\sigma = E\epsilon (1)", "(1)")
+
+
 def test_enumerated_list_item_record_rejects_parenthetical_numbers():
     text = "lithium, (3) spacers, (4) o-ring and (5) binder clip; the laser source is above the"
 

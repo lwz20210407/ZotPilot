@@ -5664,14 +5664,33 @@ def _looks_like_figure_or_table_reference_record(text: str, equation_number: str
     normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
     if not normalized or not normalized_number:
         return False
+    number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
+    if _looks_like_caption_record_with_equation_reference(normalized, number_pattern):
+        return True
     if _has_formula_payload_signal(normalized):
         return False
-    number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
     reference_pattern = (
         rf"\b(?:figs?|figures?|tables?|tabs?|schemes?|algorithms?|alg\.?|section|sec\.?)\.?"
         rf"\s*[\(（]?\s*{number_pattern}\s*[\)）]?"
     )
     return bool(re.search(reference_pattern, normalized, re.IGNORECASE))
+
+
+def _looks_like_caption_record_with_equation_reference(text: str, number_pattern: str) -> bool:
+    caption_prefix = (
+        r"^\s*(?:"
+        r"(?:figs?|figures?|tables?|tabs?|schemes?|algorithms?|alg\.?)\.?\s*"
+        r"(?:\d+[A-Za-z]?|[IVXLCDM]+)(?:\s*[\(（][a-z][\)）])?"
+        r"|[图表]\s*\d+"
+        r")(?=$|[\s.:：,，;；])"
+    )
+    if re.search(caption_prefix, text, re.IGNORECASE) is None:
+        return False
+    equation_reference = (
+        rf"\b(?:eqs?\.?|equations?)\b"
+        rf".{{0,120}}?[\(（]?\s*{number_pattern}\s*[\)）]?"
+    )
+    return re.search(equation_reference, text, re.IGNORECASE) is not None
 
 
 def _looks_like_enumerated_list_item_record(text: str, equation_number: str) -> bool:
