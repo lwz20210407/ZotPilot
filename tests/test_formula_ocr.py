@@ -2277,6 +2277,19 @@ def test_non_formula_text_rejects_text_layer_table_header_unit_rows():
     )
 
 
+def test_non_formula_text_rejects_garbled_text_layer_headers_and_prose():
+    assert _looks_like_non_formula_text(
+        "第 !\" 卷第 # 期 $%%# 年 !$ 月 弹 道 学 报 &’()*+,’-.+,,/01/20 3’,4!\"5’4#"
+    )
+    assert _looks_like_non_formula_text(
+        "本文提出一种考虑材料损伤的新模型 $ 在 &’S*0’*8]’’J 热粘塑性本构关系中增加一个"
+    )
+    assert _looks_like_non_formula_text("Using MAT_ADD_INELASTICITY for Modelling of Polymeric Networks")
+    assert _looks_like_non_formula_text("M+17)/+,0\\2/7*27+*AW*G/*77)/*G ! !;;> ! Z$%9 $ !#%N!>9")
+    assert not _looks_like_non_formula_text("𝜀𝜀̇ 1 = (𝜆𝜆 𝑐𝑐 −1 + 𝜀𝜀 ∗ ) 𝑞𝑞 ∗ (5)")
+    assert not _looks_like_non_formula_text(r"\sigma = [A + B(\varepsilon^p)^n] (1)")
+
+
 def test_equation_reference_prose_rejects_defined_in_eq_reference():
     text = "b. RSS = R(c) defined in Eq. (19)."
 

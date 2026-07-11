@@ -6394,6 +6394,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
         return True
     if _looks_like_text_layer_table_header_or_unit_row(normalized):
         return True
+    if _looks_like_text_layer_garbled_or_prose_noise(normalized):
+        return True
 
     symbol_hits = len(MATH_SYMBOL_RE.findall(normalized))
     word_hits = len(WORD_RE.findall(normalized))
@@ -6450,6 +6452,39 @@ def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
     if re.match(r"\s*Refs?\.", normalized, re.IGNORECASE) and (unit_hits >= 2 or slash_hits >= 2):
         return True
     if unit_hits >= 5 and word_hits >= 5 and relation_hits <= 2 and strong_formula_markers == 0:
+        return True
+    return False
+
+
+def _looks_like_text_layer_garbled_or_prose_noise(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if len(normalized) < 8:
+        return False
+    if _has_formula_relation(normalized) or bool(MATH_LATEX_COMMAND_RE.search(normalized)):
+        return False
+    cjk_chars = len(CJK_CHAR_RE.findall(normalized))
+    word_hits = len(WORD_RE.findall(normalized))
+    symbol_hits = len(MATH_SYMBOL_RE.findall(normalized))
+    if re.search(r"第.{0,12}卷第.{0,12}期", normalized) and re.search(r"年|月|学报|journal", normalized, re.IGNORECASE):
+        return True
+    if cjk_chars >= 6 and re.search(r"(本文|模型|参数|根据|考虑|关系|效应|材料|提出|提供)", normalized):
+        return True
+    if cjk_chars >= 8 and symbol_hits < 5:
+        return True
+    if (
+        "_" in normalized
+        and word_hits >= 3
+        and symbol_hits <= 3
+        and not PDF_EQUATION_NUMBER_TOKEN_RE.search(normalized)
+    ):
+        return True
+    punctuation_count = len(re.findall(r"[!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~’‘]+", normalized))
+    alnum_cjk_count = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", normalized))
+    if (
+        punctuation_count >= 8
+        and punctuation_count >= alnum_cjk_count * 0.45
+        and not _has_formula_structure(normalized)
+    ):
         return True
     return False
 
