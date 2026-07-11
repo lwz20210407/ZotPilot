@@ -605,6 +605,42 @@ def test_candidate_consensus_ignores_low_information_text_signature_conflict():
     assert consensus["supported_cluster_count"] == 1
 
 
+def test_candidate_consensus_ignores_no_latex_text_layer_signature_conflict():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 12,
+                "source": "mineru_content_list",
+                "parser_label": "auto",
+                "equation_number": "(2.30)",
+                "bbox": [40, 100, 360, 130],
+                "latex_preview": (
+                    r"\varepsilon_{\mathrm{nom}} = \frac{L - L_0}{L_0} = "
+                    r"\frac{\Delta L}{L_0}"
+                ),
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 12,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(2.30)",
+                "bbox": [42, 101, 358, 131],
+                "raw_text_preview": "0 0 = ε - Δ = L L L L L （ 2.30 ）",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["conflict_cluster_count"] == 0
+    assert consensus["supported_cluster_count"] == 1
+
+
 def test_candidate_consensus_ignores_operator_heavy_short_text_signature_conflict():
     consensus = build_formula_candidate_consensus(
         [

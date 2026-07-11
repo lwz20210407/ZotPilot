@@ -358,17 +358,17 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
         for candidate in candidates
         if str(candidate["normalized_equation_number"] or "")
     }
-    signatures = {
+    conflict_signatures = {
         str(candidate["latex_signature"])
         for candidate in candidates
-        if str(candidate["latex_signature"] or "")
+        if str(candidate["latex_signature"] or "") and _candidate_signature_can_conflict(candidate)
     }
     flags = _cluster_review_flags(
         candidates,
         group_counts=group_counts,
         page_nums=page_nums,
         normalized_numbers=normalized_numbers,
-        signatures=signatures,
+        signatures=conflict_signatures,
     )
     conflict_flags = [
         flag for flag in flags
@@ -421,6 +421,14 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
             for candidate in candidates
         ],
     }
+
+
+def _candidate_signature_can_conflict(candidate: Mapping[str, Any]) -> bool:
+    if bool(candidate["has_latex"]):
+        return True
+    if bool(candidate["needs_ocr"]):
+        return False
+    return str(candidate["source_group"] or "") in STRUCTURED_SOURCE_GROUPS
 
 
 def _cluster_route(flags: list[str], conflict_flags: list[str]) -> str:
