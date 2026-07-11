@@ -130,6 +130,12 @@ PROSE_CUE_RE = re.compile(
     r"(?:计算|得到|表示|定义|根据|其中|式中|试样|样品|模型|结果|研究|本文|如图|表明)",
     re.IGNORECASE,
 )
+PDF_NUMBERED_RECORD_HEADING_NOISE_RE = re.compile(
+    r"\b(?:johnson[- ]cook\s+failure\s+parameters?|results?\s+of\s+using|new\s+database|"
+    r"center\s+for\s+collision\s+safety|ccsa|copyright|submitted\s+to|thesis|"
+    r"chapter|section|parameters?|database|university|department|laboratory)\b",
+    re.IGNORECASE,
+)
 FIGURE_PANEL_PREFIX_LATEX_RE = re.compile(
     r"^\s*\(\s*(?:\\(?:mathrm|text|textrm)\s*\{\s*)?[a-h](?:\s*\})?\s*\)",
     re.IGNORECASE,
@@ -4154,6 +4160,8 @@ def _append_missing_pdf_numbered_formula_candidates(
                 continue
             if _looks_like_bibliographic_issue_number_record(record.text, record.number):
                 continue
+            if _looks_like_pdf_numbered_heading_or_report_noise(record.text, record.number):
+                continue
             if _looks_like_equation_reference_prose_candidate(record.text, record.number):
                 continue
             bbox = _pdf_equation_record_candidate_bbox(record)
@@ -5668,6 +5676,33 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     if journal_context and re.search(r"(?:18|19|20)\d{2}", prefix):
         return True
     return False
+
+
+def _looks_like_pdf_numbered_heading_or_report_noise(text: str, equation_number: str) -> bool:
+    """Reject report headings and page furniture caught by PDF equation-number fallback."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number:
+        return False
+    if PDF_NUMBERED_RECORD_HEADING_NOISE_RE.search(normalized) is None:
+        return False
+
+    words = WORD_RE.findall(normalized)
+    uppercase_words = [word for word in words if len(word) >= 3 and word.upper() == word]
+    percent_hits = normalized.count("%")
+    section_title = bool(re.search(r"\b\d+(?:\.\d+)+\s+[A-Z][A-Z -]{8,}", normalized))
+    numbered_heading = bool(re.match(r"^\s*[\(（]\s*\d{1,3}\s*[\)）].{0,80}\b\d+(?:\.\d+)+\s+", normalized))
+    report_banner = percent_hits >= 6 and len(words) >= 3
+    heading_like = section_title or numbered_heading or report_banner or len(uppercase_words) >= 3
+
+    if not heading_like:
+        return False
+    if not _has_formula_payload_signal(normalized):
+        return True
+
+    strong_formula_markers = len(re.findall(r"[∑∏∫√∞∂∇∆]|\\(?:frac|sqrt|sum|prod|int|partial|nabla)\b", normalized))
+    prose_words = len([word for word in words if len(word) >= 4])
+    return strong_formula_markers <= 2 and prose_words >= 5
 
 
 def _loose_equation_number_token_pattern(number: str) -> str:

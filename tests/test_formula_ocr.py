@@ -2393,6 +2393,82 @@ def test_append_missing_pdf_numbered_candidates_skips_bibliographic_issue_record
     assert candidates == []
 
 
+def test_append_missing_pdf_numbered_candidates_skips_report_heading_noise(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    scan = _PdfEquationNumberScanResult(
+        records_by_page={
+            18: [
+                _PdfEquationNumberRecord(
+                    number="(1)",
+                    y_center=220.0,
+                    x_right=530.0,
+                    standalone=False,
+                    bbox=(40.0, 205.0, 530.0, 238.0),
+                    text=(
+                        "(1) (T-3) 3.2 JOHNSON-COOK FAILURE PARAMETERS. [ ][ ][ ] "
+                        "epsilon = + sigma + epsilon + * * * exp( ) ln( ) (1)"
+                    ),
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+                _PdfEquationNumberRecord(
+                    number="(2)",
+                    y_center=260.0,
+                    x_right=520.0,
+                    standalone=False,
+                    bbox=(42.0, 245.0, 520.0, 278.0),
+                    text=(
+                        "(2) 3.3 RESULTS OF USING THE NEW DATABASE. "
+                        "failure epsilon D sum epsilon failure (2)"
+                    ),
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+            ],
+            209: [
+                _PdfEquationNumberRecord(
+                    number="(1)",
+                    y_center=90.0,
+                    x_right=540.0,
+                    standalone=False,
+                    bbox=(35.0, 75.0, 540.0, 105.0),
+                    text=(
+                        "(1) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% "
+                        "% Center for Collision Safety and Analysis (CCSA) % "
+                        "% George Mason University"
+                    ),
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+            ],
+            3: [
+                _PdfEquationNumberRecord(
+                    number="(4)",
+                    y_center=320.0,
+                    x_right=410.0,
+                    standalone=False,
+                    bbox=(120.0, 305.0, 410.0, 335.0),
+                    text=r"\sigma = E\epsilon + \alpha \dot{\epsilon} (4)",
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+            ],
+        },
+        truncated=False,
+    )
+
+    candidates = _append_missing_pdf_numbered_formula_candidates(
+        pdf_path,
+        [],
+        allow_empty=True,
+        scan_result=scan,
+    )
+
+    assert [candidate.equation_number for candidate in candidates] == ["(4)"]
+    assert candidates[0].source == "pdf_text_equation_number"
+
+
 def test_bare_pdf_equation_number_fragment_record_rejects_number_only_tails():
     assert _looks_like_bare_pdf_equation_number_fragment_record("37e)", "(37e)")
     assert _looks_like_bare_pdf_equation_number_fragment_record("38)", "(38)")
