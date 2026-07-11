@@ -92,6 +92,39 @@ def test_candidate_consensus_flags_number_conflict_on_same_bbox():
     assert cluster["candidate_details"][1]["raw_text_preview"] == r"D = 1 - exp(-a epsilon_p)"
 
 
+def test_candidate_consensus_keeps_same_parser_different_numbers_separate():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 4,
+                "source": "pdf_text_equation_number",
+                "parser_label": "auto",
+                "equation_number": "(7)",
+                "bbox": [10, 20, 300, 48],
+                "raw_text_preview": r"\rho_i = \sum_j m_j W(x_i-x_j,h) (7)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 4,
+                "source": "pdf_text_equation_number",
+                "parser_label": "auto",
+                "equation_number": "(8)",
+                "bbox": [11, 20, 299, 49],
+                "raw_text_preview": r"\rho_i = \sum_j m_j W(x_i-x_j,h) (8)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
+    assert [cluster["primary_equation_number"] for cluster in consensus["clusters"]] == ["(7)", "(8)"]
+
+
 def test_candidate_consensus_clusters_same_page_latex_and_text_signature():
     consensus = build_formula_candidate_consensus(
         [

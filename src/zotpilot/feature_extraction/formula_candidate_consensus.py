@@ -207,6 +207,8 @@ def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -
     right_number = str(right.get("normalized_equation_number", "") or "")
     if left_number and right_number and left_number == right_number:
         return True
+    if left_number and right_number and left_number != right_number:
+        return _same_formula_with_conflicting_numbers(left, right)
     left_page = _int_value(left.get("page_num"))
     right_page = _int_value(right.get("page_num"))
     if left_page and left_page == right_page:
@@ -221,6 +223,25 @@ def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -
         if _formula_signatures_similar(left_signature, right_signature):
             return True
     return False
+
+
+def _same_formula_with_conflicting_numbers(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    left_page = _int_value(left.get("page_num"))
+    right_page = _int_value(right.get("page_num"))
+    if not left_page or left_page != right_page:
+        return False
+    if str(left.get("parser_label", "") or "") == str(right.get("parser_label", "") or "") and str(
+        left.get("source_group", "") or ""
+    ) == str(right.get("source_group", "") or ""):
+        return False
+    left_bbox = _bbox_value(left.get("bbox"))
+    right_bbox = _bbox_value(right.get("bbox"))
+    if len(left_bbox) != 4 or len(right_bbox) != 4 or _bbox_iou(left_bbox, right_bbox) < 0.5:
+        return False
+    return _formula_signatures_similar(
+        str(left.get("latex_signature", "") or ""),
+        str(right.get("latex_signature", "") or ""),
+    )
 
 
 def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[str, Any]:
