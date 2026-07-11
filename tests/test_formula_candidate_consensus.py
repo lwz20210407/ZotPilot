@@ -505,6 +505,75 @@ def test_candidate_consensus_normalizes_cjk_pdf_text_subscript_dash_before_equal
     assert consensus["supported_cluster_count"] == 1
 
 
+def test_candidate_consensus_ignores_equation_tags_and_subscript_separators_in_signatures():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 3,
+                "source": "mineru_content_list",
+                "parser_label": "auto",
+                "equation_number": "(1)",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"17.5 < i_{\mathrm{cmod}} < 19.9\tag{1}",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 3,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(1)",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "17 . 5 < i cmod < 19 . 9 (1)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["conflict_cluster_count"] == 0
+    assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_normalizes_text_layer_temperature_subscripts():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 10,
+                "source": "mineru_content_list",
+                "parser_label": "auto",
+                "equation_number": "(2)",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": (
+                    r"T_{\mathrm{norm}}\text{or}T^{*}="
+                    r"(T-T_{\mathrm{ref}})/(T_{\mathrm{m}}-T_{\mathrm{ref}})\tag{2}"
+                ),
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 10,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(2)",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "T norm or T ∗ = ( T − T ref ) / ( T m − T ref ) (2)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["conflict_cluster_count"] == 0
+    assert consensus["supported_cluster_count"] == 1
+
+
 def test_candidate_consensus_ignores_low_information_text_signature_conflict():
     consensus = build_formula_candidate_consensus(
         [

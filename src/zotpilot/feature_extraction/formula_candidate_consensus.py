@@ -489,6 +489,7 @@ def _formula_signature(value: str) -> str:
 
 def _normalize_formula_signature(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").lower()
+    normalized = re.sub(r"\\tag\s*\{\s*[^{}]*\s*\}", "", normalized)
     normalized = re.sub(r"\\frac\s*\{\s*([^{}]+?)\s*\}\s*\{\s*([^{}]+?)\s*\}", r"(\1)/(\2)", normalized)
     normalized = re.sub(r"\\begin\s*\{[^{}]*\}\s*(?:\{\s*[^{}]*\s*\})?", "", normalized)
     normalized = re.sub(r"\\end\s*\{[^{}]*\}", "", normalized)
@@ -514,7 +515,9 @@ def _normalize_formula_signature(value: str) -> str:
     normalized = re.sub(r"[_^]\s*\{\s*([^{}]+?)\s*\}", r"\1", normalized)
     normalized = re.sub(r"[_^]\s*([a-z0-9*])", r"\1", normalized)
     normalized = normalized.replace("{", "").replace("}", "")
+    normalized = normalized.replace("_", "")
     normalized = normalized.replace("¼", "=").replace("þ", "+").replace("−", "-")
+    normalized = re.sub(r"\(\s*\d+(?:[.-]\d+)*(?:[a-z])?\s*\)\s*$", "", normalized)
     return normalized
 
 
