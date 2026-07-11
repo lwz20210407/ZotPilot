@@ -2709,6 +2709,8 @@ def test_compare_formula_parsers_cli_can_run_candidate_provider_estimates(capsys
     assert rc == 0
     assert payload["parser_labels"] == ["mineru", "pdfkit"]
     assert payload["multi_provider_cluster_count"] == 1
+    assert set(payload["estimate_runtime_seconds_by_parser"]) == {"mineru", "pdfkit"}
+    assert payload["estimate_runtime_seconds_total"] >= 0
     assert configs[0].formula_candidate_provider == "mineru_json"
     assert configs[1].formula_candidate_provider == "pdf_extract_kit_json"
     assert configs[0].formula_candidate_cache_dirs == "F:/parser-cache"

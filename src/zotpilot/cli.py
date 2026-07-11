@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -1302,6 +1303,11 @@ def _print_formula_parser_comparison(report: dict) -> None:
                 f"preview={summary.get('preview_candidate_count', 0)}"
                 + (f" routes=({route_text})" if route_text else "")
             )
+    runtimes = report.get("estimate_runtime_seconds_by_parser") or {}
+    if runtimes:
+        print("\nEstimate runtimes:")
+        for label, seconds in sorted(runtimes.items()):
+            print(f"  - {label}: {seconds}s")
     rows = report.get("rows") or []
     if rows:
         print("\nRows:")
@@ -1723,9 +1729,14 @@ def cmd_compare_formula_parsers(args):
 
     try:
         reports = _read_named_formula_estimate_reports(getattr(args, "estimate", None))
+        runtimes: dict[str, float] = {}
         for label, provider in _parse_formula_candidate_provider_specs(getattr(args, "candidate_provider", None)):
             if label in reports:
                 raise ValueError(f"duplicate formula parser label: {label}")
+            print(
+                f"Running formula parser estimate: {label} ({provider})",
+                file=sys.stderr,
+            )
             estimate_args = argparse.Namespace(**vars(args))
             estimate_args.candidate_provider = provider
             estimate_args.candidate_cache_dirs = getattr(args, "candidate_cache_dirs", None)
@@ -1733,17 +1744,22 @@ def cmd_compare_formula_parsers(args):
             if config is None:
                 return 1
             estimate_kwargs, _preview_limit = _formula_estimate_kwargs_from_args(estimate_args)
+            started_at = time.perf_counter()
             reports[label] = _call_with_json_stdout_guard(
                 lambda config=config, estimate_kwargs=estimate_kwargs: (
                     Indexer.for_formula_estimate(config).estimate_formula_backfill(**estimate_kwargs)
                 ),
                 json_output=args.json,
             )
+            runtimes[label] = round(time.perf_counter() - started_at, 3)
         if len(reports) < 2:
             raise ValueError(
                 "compare-formula-parsers requires at least two --estimate or --candidate-provider inputs"
             )
         comparison = build_formula_external_parser_comparison(reports)
+        if runtimes:
+            comparison["estimate_runtime_seconds_by_parser"] = dict(sorted(runtimes.items()))
+            comparison["estimate_runtime_seconds_total"] = round(sum(runtimes.values()), 3)
     except (ConfigDriftError, IndexUnavailableError, OSError, json.JSONDecodeError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
