@@ -4162,6 +4162,14 @@ def _append_missing_pdf_numbered_formula_candidates(
                 continue
             if _looks_like_pdf_numbered_heading_or_report_noise(record.text, record.number):
                 continue
+            if _looks_like_figure_or_table_reference_record(record.text, record.number):
+                continue
+            if _looks_like_enumerated_list_item_record(record.text, record.number):
+                continue
+            if _looks_like_table_or_step_plain_number_record(record.text, record.number):
+                continue
+            if _looks_like_numeric_table_parenthetical_record(record.text, record.number):
+                continue
             if _looks_like_equation_reference_prose_candidate(record.text, record.number):
                 continue
             bbox = _pdf_equation_record_candidate_bbox(record)
@@ -5729,6 +5737,11 @@ def _looks_like_figure_or_table_reference_record(text: str, equation_number: str
     number_pattern = re.escape(normalized_number).replace(r"\.", r"[.:]").replace(r"\-", r"[-–—－−]")
     if _looks_like_caption_record_with_equation_reference(normalized, number_pattern):
         return True
+    caption_prefix = r"^\s*(?:(?:fig(?:ure)?|tab(?:le)?)\.?\s*\d+|[图表]\s*\d+)(?=$|[\s.:：,，;；])"
+    if re.search(caption_prefix, normalized, re.IGNORECASE):
+        strong_formula_markers = re.search(r"[∑∏∫√∞∂∇∆]|\\(?:frac|sqrt|sum|prod|int|partial|nabla)\b", normalized)
+        if not (_has_formula_relation(normalized) or strong_formula_markers):
+            return True
     if _has_formula_payload_signal(normalized):
         return False
     reference_pattern = (
