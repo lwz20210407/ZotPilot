@@ -148,6 +148,10 @@ TEXT_LAYER_TABLE_HEADER_TOKEN_RE = re.compile(
     r"projectile|velocity|thickness|diameter|density|temperature|DOP)\b",
     re.IGNORECASE,
 )
+TEXT_LAYER_CHEMICAL_COMPOSITION_TOKEN_RE = re.compile(
+    r"\b(?:titanium|alumini?um|vanadium|iron|oxygen|carbon|balance|chemical|composition)\b",
+    re.IGNORECASE,
+)
 TEXT_LAYER_TABLE_UNIT_TOKEN_RE = re.compile(
     r"(?:\([^)]{0,40}\b(?:kg|g|GPa|MPa|Pa|K|mm|cm|m|s|J|N|kN|Hz|mol|W|%)\b[^)]{0,40}\)|"
     r"/\s*(?:[A-Za-zµμ°$][A-Za-z0-9µμ°$^(). -]{0,24})|"
@@ -6439,14 +6443,18 @@ def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
     if len(normalized) < 20:
         return False
     header_hits = len(TEXT_LAYER_TABLE_HEADER_TOKEN_RE.findall(normalized))
+    chemical_hits = len(TEXT_LAYER_CHEMICAL_COMPOSITION_TOKEN_RE.findall(normalized))
     unit_hits = len(TEXT_LAYER_TABLE_UNIT_TOKEN_RE.findall(normalized))
     slash_hits = normalized.count("/")
+    percent_hits = normalized.count("%")
     relation_hits = len(
         re.findall(rf"(?:=|¼|≈|≤|≥|≠|:=|\\leq?|\\geq?|\\approx|\\sim|{PRIVATE_USE_RELATION_RE})", normalized)
     )
     word_hits = len(WORD_RE.findall(normalized))
     strong_formula_markers = len(re.findall(r"[∑∏∫√∞∂∇∆]|\\(?:frac|sqrt|sum|prod|int|partial|nabla)\b", normalized))
 
+    if chemical_hits >= 4 and percent_hits >= 2 and strong_formula_markers == 0:
+        return True
     if header_hits >= 2 and unit_hits >= 2 and word_hits >= 4:
         return True
     if header_hits >= 1 and unit_hits >= 4:

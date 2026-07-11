@@ -948,6 +948,13 @@ def test_text_layer_provider_does_not_reinclude_zero_confidence_metadata(tmp_pat
         {2},
     ) == 0.0
     assert _candidate_confidence(
+        "Titanium(Ti) Aluminium(Al) Vanadium(V) Iron(Fe) Oxygen(O) Carbon(C) "
+        "Balance ≈90% 6% 4% <=0.25% <=0.20% <=0.08%",
+        bbox,
+        {"CMMI10"},
+        {2},
+    ) == 0.0
+    assert _candidate_confidence(
         "图 4 断口形貌及韧窝分布特征。",
         bbox,
         {"CMMI10"},
