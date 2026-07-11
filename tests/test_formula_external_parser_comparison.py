@@ -107,6 +107,78 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
     assert cluster["candidate_details"][1]["parser_label"] == "pdf_extract_kit"
 
 
+def test_external_parser_comparison_routes_structured_no_overlap_to_single_parser_review():
+    mineru_estimate = {
+        "candidate_count": 2,
+        "results": [
+            {
+                "item_key": "DOC_NO_OVERLAP",
+                "title": "Structured only formulas",
+                "candidate_count": 2,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 2}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 3,
+                        "source": "mineru_content_list",
+                        "equation_number": "(1)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"D = \frac{A_D}{A_0}",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    },
+                    {
+                        "candidate_index": 1,
+                        "page_num": 3,
+                        "source": "mineru_content_list",
+                        "equation_number": "(2)",
+                        "bbox": [10, 60, 300, 88],
+                        "latex_preview": r"D = 1 - \frac{\tilde E}{E_0}",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ],
+    }
+    text_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_NO_OVERLAP",
+                "title": "Structured only formulas",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"text_layer": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 8,
+                        "source": "text_layer",
+                        "equation_number": "",
+                        "bbox": [20, 100, 220, 120],
+                        "raw_text_preview": "hardness HV5 >= 2400",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"mineru": mineru_estimate, "text": text_estimate}
+    )
+
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == [
+        "candidate_count_mismatch",
+        "no_cross_parser_candidate_overlap",
+    ]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+    assert comparison["manual_review_paper_count"] == 0
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+
+
 def test_external_parser_comparison_routes_conflicts_to_manual_review():
     first_estimate = {
         "candidate_count": 1,

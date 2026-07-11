@@ -270,6 +270,12 @@ def _write_recommendation(
         "no_cross_parser_candidate_overlap",
     }
     if conflict_count > 0 or any(flag in hard_review_flags for flag in flags):
+        if (
+            conflict_count == 0
+            and "no_cross_parser_candidate_overlap" in flags
+            and _has_structured_single_parser_review_candidate(consensus)
+        ):
+            return "single_parser_candidate_review"
         return "manual_review_queue"
     if "parser_without_candidates" in flags or "opaque_text_layer_candidate_evidence" in flags:
         return "single_parser_candidate_review"
@@ -282,6 +288,15 @@ def _write_recommendation(
     if multi_provider_count > 0:
         return "candidate_supported_by_cross_parser_review"
     return "manual_review_queue"
+
+
+def _has_structured_single_parser_review_candidate(consensus: Mapping[str, Any]) -> bool:
+    for cluster in _list_value(consensus.get("clusters")):
+        if not isinstance(cluster, Mapping):
+            continue
+        if _int_value(cluster.get("structured_provider_group_count")) > 0:
+            return True
+    return False
 
 
 def _parser_summary_has_opaque_text_layer_evidence(summary: Mapping[str, Any]) -> bool:
