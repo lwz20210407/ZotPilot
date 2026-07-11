@@ -93,6 +93,11 @@ def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -
             "multi_provider_cluster_count": 0,
             "single_provider_cluster_count": 0,
             "conflict_cluster_count": 0,
+            "supported_cluster_count": 0,
+            "review_cluster_count": 0,
+            "single_provider_review_cluster_count": 0,
+            "conflict_review_cluster_count": 0,
+            "ocr_fallback_cluster_count": 0,
             "unlocated_candidate_count": 0,
             "clusters": [],
         }
@@ -107,6 +112,7 @@ def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -
 
     cluster_rows = [_summarize_cluster(index + 1, cluster["candidates"]) for index, cluster in enumerate(clusters)]
     conflict_count = sum(1 for cluster in cluster_rows if cluster["conflict_flags"])
+    supported_count = sum(1 for cluster in cluster_rows if cluster["cluster_route"] == "supported_candidate")
     return {
         "mode": "candidate_preview_consensus",
         "preview_candidate_count": len(candidate_rows),
@@ -120,6 +126,20 @@ def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -
             if int(cluster["provider_group_count"]) == 1
         ),
         "conflict_cluster_count": conflict_count,
+        "supported_cluster_count": supported_count,
+        "review_cluster_count": len(cluster_rows) - supported_count,
+        "single_provider_review_cluster_count": sum(
+            1 for cluster in cluster_rows
+            if cluster["cluster_route"] == "single_provider_review"
+        ),
+        "conflict_review_cluster_count": sum(
+            1 for cluster in cluster_rows
+            if cluster["cluster_route"] == "conflict_review"
+        ),
+        "ocr_fallback_cluster_count": sum(
+            1 for cluster in cluster_rows
+            if "ocr_fallback_required" in cluster["review_flags"]
+        ),
         "unlocated_candidate_count": sum(
             1 for candidate in candidate_rows
             if not candidate["page_num"] or len(candidate["bbox"]) != 4
@@ -238,8 +258,10 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
         flag for flag in flags
         if flag in {"equation_number_conflict", "same_number_multiple_pages", "latex_signature_conflict"}
     ]
+    cluster_route = _cluster_route(flags, conflict_flags)
     return {
         "cluster_id": f"formula_cluster_{index:04d}",
+        "cluster_route": cluster_route,
         "candidate_count": len(candidates),
         "source_counts": dict(sorted(source_counts.items())),
         "source_group_counts": dict(sorted(group_counts.items())),
@@ -283,6 +305,16 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
             for candidate in candidates
         ],
     }
+
+
+def _cluster_route(flags: list[str], conflict_flags: list[str]) -> str:
+    if conflict_flags:
+        return "conflict_review"
+    if "multi_provider_agreement" in flags:
+        return "supported_candidate"
+    if "single_provider_only" in flags:
+        return "single_provider_review"
+    return "manual_review"
 
 
 def _cluster_review_flags(

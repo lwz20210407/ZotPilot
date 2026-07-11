@@ -49,6 +49,26 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
             _int_value(_dict_value(row.get("candidate_consensus")).get("conflict_cluster_count"))
             for row in rows
         ),
+        "supported_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("supported_cluster_count"))
+            for row in rows
+        ),
+        "review_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("review_cluster_count"))
+            for row in rows
+        ),
+        "single_provider_review_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("single_provider_review_cluster_count"))
+            for row in rows
+        ),
+        "conflict_review_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("conflict_review_cluster_count"))
+            for row in rows
+        ),
+        "ocr_fallback_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("ocr_fallback_cluster_count"))
+            for row in rows
+        ),
         "manual_review_paper_count": sum(
             1 for row in rows
             if row["write_recommendation"] == "manual_review_queue"

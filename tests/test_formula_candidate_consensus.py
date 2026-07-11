@@ -41,7 +41,13 @@ def test_candidate_consensus_clusters_same_formula_across_structured_providers()
     assert consensus["cluster_count"] == 2
     assert consensus["multi_provider_cluster_count"] == 1
     assert consensus["single_provider_cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+    assert consensus["review_cluster_count"] == 1
+    assert consensus["single_provider_review_cluster_count"] == 1
+    assert consensus["conflict_review_cluster_count"] == 0
+    assert consensus["ocr_fallback_cluster_count"] == 1
     first_cluster = consensus["clusters"][0]
+    assert first_cluster["cluster_route"] == "supported_candidate"
     assert first_cluster["source_group_counts"] == {
         "mineru_cache": 1,
         "pdf_extract_kit": 1,
@@ -80,6 +86,7 @@ def test_candidate_consensus_flags_number_conflict_on_same_bbox():
     assert consensus["cluster_count"] == 1
     assert consensus["conflict_cluster_count"] == 1
     cluster = consensus["clusters"][0]
+    assert cluster["cluster_route"] == "conflict_review"
     assert "equation_number_conflict" in cluster["conflict_flags"]
     assert "ocr_fallback_required" in cluster["review_flags"]
     assert cluster["candidate_details"][1]["raw_text_preview"] == r"D = 1 - exp(-a epsilon_p)"
@@ -113,7 +120,9 @@ def test_candidate_consensus_clusters_same_page_latex_and_text_signature():
 
     assert consensus["cluster_count"] == 1
     assert consensus["multi_provider_cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
     cluster = consensus["clusters"][0]
+    assert cluster["cluster_route"] == "supported_candidate"
     assert "multi_provider_agreement" in cluster["review_flags"]
     assert "missing_equation_number" in cluster["review_flags"]
 
@@ -146,3 +155,5 @@ def test_candidate_consensus_keeps_different_same_page_formulas_separate():
 
     assert consensus["cluster_count"] == 2
     assert consensus["multi_provider_cluster_count"] == 0
+    assert consensus["supported_cluster_count"] == 0
+    assert consensus["single_provider_review_cluster_count"] == 2

@@ -2511,6 +2511,8 @@ def test_compare_formula_parsers_cli_writes_output_file(tmp_path, capsys):
     assert rc == 0
     output = capsys.readouterr().out
     assert "Formula external parser comparison:" in output
+    assert "Supported clusters:" in output
+    assert "Review clusters:" in output
     assert "Write recommendations:" in output
     assert "candidate_supported_by_cross_parser_review: 1" in output
     assert "Parser summaries:" in output

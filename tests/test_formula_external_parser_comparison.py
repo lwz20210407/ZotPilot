@@ -63,6 +63,11 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
     assert comparison["paper_count"] == 1
     assert comparison["multi_provider_cluster_count"] == 1
     assert comparison["conflict_cluster_count"] == 0
+    assert comparison["supported_cluster_count"] == 1
+    assert comparison["review_cluster_count"] == 0
+    assert comparison["single_provider_review_cluster_count"] == 0
+    assert comparison["conflict_review_cluster_count"] == 0
+    assert comparison["ocr_fallback_cluster_count"] == 0
     assert comparison["manual_review_paper_count"] == 0
     assert comparison["partial_review_paper_count"] == 0
     assert comparison["review_required_paper_count"] == 0
@@ -159,6 +164,11 @@ def test_external_parser_comparison_routes_conflicts_to_manual_review():
     )
 
     assert comparison["conflict_cluster_count"] == 1
+    assert comparison["supported_cluster_count"] == 0
+    assert comparison["review_cluster_count"] == 2
+    assert comparison["single_provider_review_cluster_count"] == 1
+    assert comparison["conflict_review_cluster_count"] == 1
+    assert comparison["ocr_fallback_cluster_count"] == 2
     assert comparison["manual_review_paper_count"] == 1
     row = comparison["rows"][0]
     assert set(row["comparison_flags"]) >= {
@@ -238,6 +248,9 @@ def test_external_parser_comparison_routes_count_mismatch_with_overlap_to_partia
     assert comparison["manual_review_paper_count"] == 0
     assert comparison["partial_review_paper_count"] == 1
     assert comparison["review_required_paper_count"] == 1
+    assert comparison["supported_cluster_count"] == 1
+    assert comparison["single_provider_review_cluster_count"] == 1
+    assert comparison["ocr_fallback_cluster_count"] == 2
     assert comparison["write_recommendation_counts"] == {
         "partial_cross_parser_support_review_extras": 1
     }
