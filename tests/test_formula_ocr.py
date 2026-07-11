@@ -2263,6 +2263,11 @@ def test_enumerated_list_item_record_rejects_parenthetical_numbers():
 
 def test_non_formula_text_rejects_crystallographic_plane_sequence():
     assert _looks_like_non_formula_text("β (110) β (200) β (211)")
+    assert _looks_like_non_formula_text("the { 10 − 1 2 } < 10 − 1 1 > extension twinning variants")
+    assert _looks_like_non_formula_text("that the SF value for { 1 − 1 00 }")
+    assert _looks_like_non_formula_text("< 11 − 2 0")
+    assert _looks_like_non_formula_text("<c+a>")
+    assert _looks_like_non_formula_text("nent was changed into { 2 − 1 − 1 2 }")
     assert not _looks_like_non_formula_text(r"\beta = \sigma_{110} + \sigma_{200} (211)")
 
 
@@ -2522,6 +2527,57 @@ def test_append_missing_pdf_numbered_candidates_skips_table_caption_noise(tmp_pa
     )
 
     assert [candidate.equation_number for candidate in candidates] == ["(2-5)"]
+
+
+def test_append_missing_pdf_numbered_candidates_skips_axis_and_crystal_noise(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    scan = _PdfEquationNumberScanResult(
+        records_by_page={
+            5: [
+                _PdfEquationNumberRecord(
+                    number="(5)",
+                    y_center=180.0,
+                    x_right=160.0,
+                    standalone=False,
+                    bbox=(40.0, 165.0, 160.0, 198.0),
+                    text="F/S0 (MPa) (5)",
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+                _PdfEquationNumberRecord(
+                    number="(2)",
+                    y_center=220.0,
+                    x_right=180.0,
+                    standalone=False,
+                    bbox=(42.0, 205.0, 180.0, 238.0),
+                    text="{10 (2)",
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+                _PdfEquationNumberRecord(
+                    number="(6)",
+                    y_center=260.0,
+                    x_right=420.0,
+                    standalone=False,
+                    bbox=(110.0, 245.0, 420.0, 275.0),
+                    text=r"\sigma = E\epsilon + \alpha (6)",
+                    page_width=595.0,
+                    page_height=842.0,
+                ),
+            ]
+        },
+        truncated=False,
+    )
+
+    candidates = _append_missing_pdf_numbered_formula_candidates(
+        pdf_path,
+        [],
+        allow_empty=True,
+        scan_result=scan,
+    )
+
+    assert [candidate.equation_number for candidate in candidates] == ["(6)"]
 
 
 def test_bare_pdf_equation_number_fragment_record_rejects_number_only_tails():

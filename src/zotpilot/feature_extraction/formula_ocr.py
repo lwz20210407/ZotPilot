@@ -4164,6 +4164,10 @@ def _append_missing_pdf_numbered_formula_candidates(
                 continue
             if _looks_like_pdf_numbered_heading_or_report_noise(record.text, record.number):
                 continue
+            if _looks_like_crystallographic_orientation_or_twinning_text(record.text):
+                continue
+            if _looks_like_axis_unit_label_record(record.text, record.number):
+                continue
             if _looks_like_figure_or_table_reference_record(record.text, record.number):
                 continue
             if _looks_like_enumerated_list_item_record(record.text, record.number):
@@ -4351,6 +4355,10 @@ def _scan_pdf_equation_number_records_by_page(
             if _looks_like_equation_reference_prose_candidate(record.text, record.number):
                 continue
             if _looks_like_figure_or_table_reference_record(record.text, record.number):
+                continue
+            if _looks_like_crystallographic_orientation_or_twinning_text(record.text):
+                continue
+            if _looks_like_axis_unit_label_record(record.text, record.number):
                 continue
             if _looks_like_enumerated_list_item_record(record.text, record.number):
                 continue
@@ -5855,6 +5863,29 @@ def _looks_like_numeric_table_parenthetical_record(text: str, equation_number: s
     return parenthetical_numeric_hits >= 3 and decimal_hits >= 5
 
 
+def _looks_like_axis_unit_label_record(text: str, equation_number: str) -> bool:
+    """Reject plot-axis/unit labels recovered as numbered equations."""
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
+    if not normalized or not normalized_number:
+        return False
+    number_pattern = _loose_equation_number_token_pattern(normalized_number)
+    if not re.search(rf"[\(（]\s*{number_pattern}\s*[\)）]\s*$", normalized):
+        return False
+    without_number = re.sub(rf"[\(（]\s*{number_pattern}\s*[\)）]\s*$", "", normalized).strip()
+    if _has_formula_relation(without_number):
+        return False
+    return bool(
+        re.fullmatch(
+            r"[A-Za-zΑ-Ωα-ω][A-Za-z0-9Α-Ωα-ω]?\s*/\s*"
+            r"[A-Za-zΑ-Ωα-ω][A-Za-z0-9Α-Ωα-ω]?\s*"
+            r"[\(（]\s*(?:MPa|GPa|Pa|kN|N|mm|cm|%)\s*[\)）]",
+            without_number,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_bare_pdf_equation_number_fragment_record(text: str, equation_number: str) -> bool:
     """Reject lone recovered equation-number tails that lack formula context."""
     normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
@@ -6062,6 +6093,41 @@ def _looks_like_crystallographic_plane_sequence_text(text: str) -> bool:
     residue = re.sub(r"\b(?:α|β|γ|hcp|fcc|bcc|hcp|bcc|fcc|martensite|austenite)\b", " ", residue, flags=re.IGNORECASE)
     residue = re.sub(r"[A-Za-zΑ-Ωα-ω\s,.;:：，。/\\-–—＋+·•]+", " ", residue)
     return not _normalize_space(residue)
+
+
+def _looks_like_crystallographic_orientation_or_twinning_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized:
+        return False
+    if MATH_LATEX_COMMAND_RE.search(normalized):
+        return False
+    orientation_hits = re.findall(
+        r"[\{\[\(<]\s*\d{1,2}(?:\s*(?:[-−–—]\s*)?\d{1,2}){1,4}\s*[\}\]\)>]",
+        normalized,
+    )
+    direction_hits = re.findall(r"<\s*[a-z](?:\s*[+＋]\s*[a-z])+\s*>", normalized, flags=re.IGNORECASE)
+    broken_orientation_fragment = bool(
+        re.fullmatch(r"[\s\{\}\[\]()<>\d\-−–—]+(?:[\(（]\s*\d{1,3}\s*[\)）])?", normalized)
+        and re.search(r"[\{\}\[\]<>]", normalized)
+        and re.search(r"\d\s*[-−–—]\s*\d|\d{2}", normalized)
+    )
+    if not orientation_hits and not direction_hits and not broken_orientation_fragment:
+        return False
+    direction_only = direction_hits and re.fullmatch(
+        r"\s*<\s*[a-z](?:\s*[+＋]\s*[a-z])+\s*>\s*(?:[\(（]\s*\d{1,3}\s*[\)）])?\s*",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if broken_orientation_fragment or direction_only:
+        return True
+    context = re.search(
+        r"\b(?:pole\s+figure|texture|orientation|crystallographic|plane|planes?|"
+        r"direction|directions?|twin|twinning|variant|variants|lath|laths|sf\s+value|"
+        r"fiber\s+texture|basal|prismatic|extension\s+twinning|changed\s+into)\b",
+        normalized,
+        re.IGNORECASE,
+    )
+    return context is not None
 
 
 def _looks_like_crystallographic_orientation_context(prefix: str, suffix: str) -> bool:
@@ -6449,6 +6515,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
     if _looks_like_crystallographic_plane_relation_text(normalized):
         return True
     if _looks_like_crystallographic_plane_sequence_text(normalized):
+        return True
+    if _looks_like_crystallographic_orientation_or_twinning_text(normalized):
         return True
     if _looks_like_algorithmic_control_flow_text(normalized):
         return True
