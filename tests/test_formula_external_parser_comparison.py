@@ -63,6 +63,9 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
     assert comparison["paper_count"] == 1
     assert comparison["multi_provider_cluster_count"] == 1
     assert comparison["conflict_cluster_count"] == 0
+    assert comparison["manual_review_paper_count"] == 0
+    assert comparison["partial_review_paper_count"] == 0
+    assert comparison["review_required_paper_count"] == 0
     assert comparison["comparison_flag_counts"] == {}
     assert comparison["write_recommendation_counts"] == {
         "candidate_supported_by_cross_parser_review": 1
@@ -168,6 +171,79 @@ def test_external_parser_comparison_routes_conflicts_to_manual_review():
         "candidate_count_mismatch": 1,
     }
     assert comparison["write_recommendation_counts"] == {"manual_review_queue": 1}
+
+
+def test_external_parser_comparison_routes_count_mismatch_with_overlap_to_partial_review():
+    first_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC3",
+                "title": "Partially supported Paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 2,
+                        "source": "mineru_content_list",
+                        "equation_number": "(1)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"\sigma = E\varepsilon",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ],
+    }
+    second_estimate = {
+        "candidate_count": 2,
+        "results": [
+            {
+                "item_key": "DOC3",
+                "title": "Partially supported Paper",
+                "candidate_count": 2,
+                "candidate_audit": {"source_counts": {"text_layer": 2}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 2,
+                        "source": "text_layer",
+                        "equation_number": "(1)",
+                        "bbox": [12, 21, 298, 49],
+                        "raw_text_preview": "σ = E ε",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    },
+                    {
+                        "candidate_index": 1,
+                        "page_num": 4,
+                        "source": "text_layer",
+                        "equation_number": "(2)",
+                        "bbox": [40, 60, 220, 90],
+                        "raw_text_preview": "D = 1 - exp(-a epsilon)",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    },
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"mineru": first_estimate, "text": second_estimate}
+    )
+
+    assert comparison["manual_review_paper_count"] == 0
+    assert comparison["partial_review_paper_count"] == 1
+    assert comparison["review_required_paper_count"] == 1
+    assert comparison["write_recommendation_counts"] == {
+        "partial_cross_parser_support_review_extras": 1
+    }
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["candidate_count_mismatch"]
+    assert row["write_recommendation"] == "partial_cross_parser_support_review_extras"
 
 
 def test_external_parser_comparison_tracks_readonly_index_change():

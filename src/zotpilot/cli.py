@@ -1271,6 +1271,8 @@ def _print_formula_parser_comparison(report: dict) -> None:
     print(f"  Multi-provider clusters:  {report.get('multi_provider_cluster_count', 0)}")
     print(f"  Conflict clusters:        {report.get('conflict_cluster_count', 0)}")
     print(f"  Manual review papers:     {report.get('manual_review_paper_count', 0)}")
+    print(f"  Partial review papers:    {report.get('partial_review_paper_count', 0)}")
+    print(f"  Review-required papers:   {report.get('review_required_paper_count', 0)}")
     candidate_counts = report.get("candidate_count_by_parser") or {}
     if candidate_counts:
         print("\nCandidate counts:")
@@ -1776,7 +1778,7 @@ def cmd_compare_formula_parsers(args):
         return 6
     if getattr(args, "fail_on_conflicts", False) and comparison.get("conflict_cluster_count"):
         return 7
-    if getattr(args, "fail_on_manual_review", False) and comparison.get("manual_review_paper_count"):
+    if getattr(args, "fail_on_manual_review", False) and comparison.get("review_required_paper_count"):
         return 8
     return 0
 

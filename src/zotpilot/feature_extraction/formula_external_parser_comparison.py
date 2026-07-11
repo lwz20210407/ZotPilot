@@ -53,6 +53,17 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
             1 for row in rows
             if row["write_recommendation"] == "manual_review_queue"
         ),
+        "partial_review_paper_count": sum(
+            1 for row in rows
+            if row["write_recommendation"] == "partial_cross_parser_support_review_extras"
+        ),
+        "review_required_paper_count": sum(
+            1 for row in rows
+            if row["write_recommendation"] in {
+                "manual_review_queue",
+                "partial_cross_parser_support_review_extras",
+            }
+        ),
         "comparison_flag_counts": _comparison_flag_counts(rows),
         "write_recommendation_counts": _write_recommendation_counts(rows),
         "parser_candidate_summary": _parser_candidate_summary(rows, parser_labels),
@@ -175,9 +186,21 @@ def _write_recommendation(
 ) -> str:
     if not candidate_counts or sum(candidate_counts) == 0:
         return "skip_no_formula_candidate"
+    conflict_count = _int_value(consensus.get("conflict_cluster_count"))
+    multi_provider_count = _int_value(consensus.get("multi_provider_cluster_count"))
+    hard_review_flags = {
+        "missing_parser_result",
+        "candidate_preview_missing",
+        "candidate_consensus_conflicts",
+        "no_cross_parser_candidate_overlap",
+    }
+    if conflict_count > 0 or any(flag in hard_review_flags for flag in flags):
+        return "manual_review_queue"
+    if flags == ["candidate_count_mismatch"] and multi_provider_count > 0:
+        return "partial_cross_parser_support_review_extras"
     if flags:
         return "manual_review_queue"
-    if _int_value(consensus.get("multi_provider_cluster_count")) > 0:
+    if multi_provider_count > 0:
         return "candidate_supported_by_cross_parser_review"
     return "manual_review_queue"
 

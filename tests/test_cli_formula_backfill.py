@@ -2601,6 +2601,97 @@ def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):
     assert payload["conflict_cluster_count"] == 1
 
 
+def test_compare_formula_parsers_cli_treats_partial_review_as_manual_failure(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    first_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 1,
+                "results": [
+                    {
+                        "item_key": "DOC1",
+                        "title": "Paper",
+                        "candidate_count": 1,
+                        "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "mineru_content_list",
+                                "equation_number": "(1)",
+                                "bbox": [10, 20, 300, 48],
+                                "latex_preview": r"\sigma = E\varepsilon",
+                                "has_latex": True,
+                                "needs_ocr": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    second_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 2,
+                "results": [
+                    {
+                        "item_key": "DOC1",
+                        "title": "Paper",
+                        "candidate_count": 2,
+                        "candidate_audit": {"source_counts": {"text_layer": 2}},
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "text_layer",
+                                "equation_number": "(1)",
+                                "bbox": [12, 20, 299, 49],
+                                "raw_text_preview": "σ = E ε",
+                                "has_latex": False,
+                                "needs_ocr": True,
+                            },
+                            {
+                                "candidate_index": 1,
+                                "page_num": 2,
+                                "source": "text_layer",
+                                "equation_number": "(2)",
+                                "bbox": [12, 60, 299, 88],
+                                "raw_text_preview": "D = 1 - exp(-a epsilon)",
+                                "has_latex": False,
+                                "needs_ocr": True,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "compare-formula-parsers",
+            "--estimate",
+            f"first={first_path}",
+            "--estimate",
+            f"second={second_path}",
+            "--fail-on-manual-review",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 8
+    assert payload["manual_review_paper_count"] == 0
+    assert payload["partial_review_paper_count"] == 1
+    assert payload["review_required_paper_count"] == 1
+
+
 def test_compare_formula_parsers_cli_can_fail_on_readonly_index_change(tmp_path, capsys):
     from zotpilot.cli import main
 
