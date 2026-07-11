@@ -2226,6 +2226,18 @@ def test_audit_formula_candidates_cli_outputs_provider_cross_review_json(capsys)
                     "last_equation_number": "(1)",
                     "equation_number_warnings": [],
                 },
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 1,
+                        "source": "mineru_content_list",
+                        "equation_number": "(1)",
+                        "bbox": [1, 2, 3, 4],
+                        "latex_preview": r"E = mc^2",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
             }
         ],
         "formula_quality_route_summary": [
@@ -2275,7 +2287,10 @@ def test_audit_formula_candidates_cli_outputs_provider_cross_review_json(capsys)
     assert payload["mode"] == "read_only_formula_candidate_audit"
     assert review["simpletex_role"] == "fallback_recognizer_only"
     assert review["provider_group_totals"] == {"mineru_cache": 1}
+    assert review["candidate_previewed_paper_count"] == 1
+    assert review["candidate_consensus_cluster_count"] == 1
     assert review["rows"][0]["simpletex_external_call_count"] == 1
+    assert review["rows"][0]["candidate_preview_coverage"] == "complete"
     assert config.formula_candidate_cache_pdf_number_enrichment is True
     indexer.estimate_formula_backfill.assert_called_once_with(
         item_key="DOC1",

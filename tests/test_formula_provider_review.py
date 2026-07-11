@@ -169,3 +169,79 @@ def test_provider_cross_review_blocks_pdf_text_layer_only_auto_write():
         "pdf_text_layer_only",
     }
     assert row["write_recommendation"] == "manual_review_queue"
+
+
+def test_provider_cross_review_adds_candidate_consensus_from_complete_preview():
+    estimate = {
+        "provider": "local",
+        "candidate_provider": "auto",
+        "candidate_count": 2,
+        "results": [
+            {
+                "item_key": "DOC4",
+                "title": "Consensus Paper",
+                "candidate_count": 2,
+                "candidate_audit": {
+                    "candidate_count": 2,
+                    "source_counts": {
+                        "mineru_content_list": 1,
+                        "pdf_extract_kit_formula_detection": 1,
+                    },
+                    "ocr_needed_count": 1,
+                    "cached_latex_count": 1,
+                    "page_min": 2,
+                    "page_max": 2,
+                    "page_count_with_candidates": 1,
+                    "page_tagged_count": 2,
+                    "page_missing_count": 0,
+                    "bbox_present_count": 2,
+                    "bbox_missing_count": 0,
+                    "numbered_count": 2,
+                    "unnumbered_count": 0,
+                    "first_equation_number": "(3)",
+                    "last_equation_number": "(4)",
+                    "equation_number_warnings": [],
+                },
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 2,
+                        "source": "mineru_content_list",
+                        "equation_number": "(3)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"D = 1 - \exp(-a\varepsilon_p)",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    },
+                    {
+                        "candidate_index": 1,
+                        "page_num": 2,
+                        "source": "pdf_extract_kit_formula_detection",
+                        "equation_number": "(4)",
+                        "bbox": [11, 20, 299, 49],
+                        "raw_text_preview": r"D = 1 - exp(-a epsilon_p)",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    },
+                ],
+            }
+        ],
+        "formula_quality_route_summary": [
+            {
+                "item_key": "DOC4",
+                "quality_route": "auto_candidate",
+                "route_reason": "candidate_quality_clear",
+            }
+        ],
+    }
+
+    review = build_formula_provider_cross_review(estimate)
+
+    assert review["candidate_previewed_paper_count"] == 1
+    assert review["candidate_consensus_cluster_count"] == 1
+    assert review["candidate_conflict_cluster_count"] == 1
+    row = review["rows"][0]
+    assert row["candidate_preview_coverage"] == "complete"
+    assert row["candidate_consensus"]["multi_provider_cluster_count"] == 1
+    assert "candidate_consensus_conflicts" in row["review_flags"]
+    assert row["write_recommendation"] == "manual_review_queue"

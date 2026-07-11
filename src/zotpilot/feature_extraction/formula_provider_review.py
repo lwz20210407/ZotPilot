@@ -6,6 +6,8 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
+from .formula_candidate_consensus import build_formula_candidate_consensus, source_group
+
 STRUCTURED_PROVIDER_GROUPS = {
     "docling",
     "marker",
@@ -53,6 +55,23 @@ def build_formula_provider_cross_review(estimate: Mapping[str, Any]) -> dict[str
             for row in rows
             if _int_value(_dict_value(row.get("semantic_evidence")).get("unmatched_reference_count")) > 0
         ),
+        "candidate_previewed_paper_count": sum(
+            1
+            for row in rows
+            if _dict_value(row.get("candidate_consensus")).get("mode") == "candidate_preview_consensus"
+        ),
+        "candidate_consensus_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("cluster_count"))
+            for row in rows
+        ),
+        "candidate_multi_provider_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("multi_provider_cluster_count"))
+            for row in rows
+        ),
+        "candidate_conflict_cluster_count": sum(
+            _int_value(_dict_value(row.get("candidate_consensus")).get("conflict_cluster_count"))
+            for row in rows
+        ),
         "write_blocked": bool(estimate.get("write_blocked")),
         "write_review_required": bool(estimate.get("write_review_required")),
         "readonly_index_changed": bool(estimate.get("readonly_index_changed")),
@@ -70,6 +89,11 @@ def _provider_cross_review_row(
     source_counts = _dict_value(audit.get("source_counts"))
     source_group_counts = _source_group_counts(source_counts)
     semantic_evidence = _semantic_summary(row)
+    candidate_consensus = build_formula_candidate_consensus(_list_value(row.get("candidate_preview")))
+    candidate_preview_coverage = _candidate_preview_coverage(
+        candidate_count=_int_value(row.get("candidate_count")),
+        candidate_consensus=candidate_consensus,
+    )
     simpletex_external_call_count = (
         _int_value(row.get("estimated_external_calls"))
         if provider == "simpletex"
@@ -80,6 +104,8 @@ def _provider_cross_review_row(
         audit=audit,
         semantic_evidence=semantic_evidence,
         source_group_counts=source_group_counts,
+        candidate_consensus=candidate_consensus,
+        candidate_preview_coverage=candidate_preview_coverage,
         simpletex_external_call_count=simpletex_external_call_count,
     )
     return {
@@ -116,6 +142,8 @@ def _provider_cross_review_row(
             "equation_number_warnings": _list_value(audit.get("equation_number_warnings")),
         },
         "semantic_evidence": semantic_evidence,
+        "candidate_preview_coverage": candidate_preview_coverage,
+        "candidate_consensus": candidate_consensus,
         "review_flags": sorted(set(review_flags)),
         "simpletex_external_call_count": simpletex_external_call_count,
         "write_recommendation": _write_recommendation(quality_route, review_flags),
@@ -125,30 +153,8 @@ def _provider_cross_review_row(
 def _source_group_counts(source_counts: Mapping[str, Any]) -> Counter[str]:
     groups: Counter[str] = Counter()
     for source, count in source_counts.items():
-        groups[_source_group(str(source))] += _int_value(count)
+        groups[source_group(str(source))] += _int_value(count)
     return groups
-
-
-def _source_group(source: str) -> str:
-    if source == "text_layer" or source.startswith("pdf_text"):
-        return "pdf_text_layer"
-    if source.startswith("mineru_"):
-        return "mineru_cache"
-    if source.startswith("pdf_extract_kit_"):
-        return "pdf_extract_kit"
-    if source.startswith("pix2text_"):
-        return "pix2text"
-    if source.startswith("marker_"):
-        return "marker"
-    if source.startswith("docling_"):
-        return "docling"
-    if source.startswith("monkeyocr_"):
-        return "monkeyocr"
-    if source.startswith("ocrflux_"):
-        return "ocrflux"
-    if source.startswith("olmocr_"):
-        return "olmocr"
-    return "other"
 
 
 def _semantic_summary(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -180,6 +186,8 @@ def _review_flags(
     audit: Mapping[str, Any],
     semantic_evidence: Mapping[str, Any],
     source_group_counts: Mapping[str, int],
+    candidate_consensus: Mapping[str, Any],
+    candidate_preview_coverage: str,
     simpletex_external_call_count: int,
 ) -> list[str]:
     flags = [str(flag) for flag in _list_value(audit.get("equation_number_warnings"))]
@@ -201,7 +209,20 @@ def _review_flags(
         flags.append("ocr_fallback_required")
     if simpletex_external_call_count:
         flags.append("simpletex_external_fallback")
+    if candidate_preview_coverage == "complete" and _int_value(candidate_consensus.get("conflict_cluster_count")):
+        flags.append("candidate_consensus_conflicts")
     return flags
+
+
+def _candidate_preview_coverage(*, candidate_count: int, candidate_consensus: Mapping[str, Any]) -> str:
+    preview_count = _int_value(candidate_consensus.get("preview_candidate_count"))
+    if candidate_count <= 0:
+        return "none"
+    if preview_count <= 0:
+        return "none"
+    if preview_count >= candidate_count:
+        return "complete"
+    return "partial"
 
 
 def _write_recommendation(quality_route: str, review_flags: list[str]) -> str:
@@ -225,6 +246,7 @@ def _blocking_review_flags(review_flags: list[str]) -> set[str]:
         "missing_page",
         "no_structured_parser_evidence",
         "pdf_text_layer_only",
+        "candidate_consensus_conflicts",
         "semantic_unmatched",
         "structured_cache_high_density",
         "text_layer_high_density",

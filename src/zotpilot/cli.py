@@ -1141,11 +1141,18 @@ def _print_formula_candidate_audit_report(report: dict, *, preview_limit: int = 
         "\nSemantic unmatched papers: "
         f"{review.get('semantic_unmatched_reference_paper_count', 0)}"
     )
+    if review.get("candidate_previewed_paper_count"):
+        print("\nCandidate consensus:")
+        print(f"  Previewed papers:          {review.get('candidate_previewed_paper_count', 0)}")
+        print(f"  Formula clusters:          {review.get('candidate_consensus_cluster_count', 0)}")
+        print(f"  Multi-provider clusters:   {review.get('candidate_multi_provider_cluster_count', 0)}")
+        print(f"  Conflict clusters:         {review.get('candidate_conflict_cluster_count', 0)}")
     rows = review.get("rows") or []
     if rows:
         print("\nReview rows:")
         for row in rows[:10]:
             traceability = row.get("traceability") or {}
+            consensus = row.get("candidate_consensus") or {}
             flags = row.get("review_flags") or []
             print(
                 f"  - {row.get('item_key')}: {row.get('quality_route')} "
@@ -1153,6 +1160,7 @@ def _print_formula_candidate_audit_report(report: dict, *, preview_limit: int = 
                 f"pages={traceability.get('page_min')}-{traceability.get('page_max')} "
                 f"bbox={traceability.get('bbox_present_count')}/"
                 f"{traceability.get('bbox_present_count', 0) + traceability.get('bbox_missing_count', 0)} "
+                f"consensus={consensus.get('cluster_count', 0)} "
                 f"recommendation={row.get('write_recommendation')}"
             )
             if flags:
