@@ -2343,6 +2343,25 @@ def test_bibliographic_issue_record_rejects_journal_volume_issue_range():
     assert not _looks_like_bibliographic_issue_number_record(r"x = y + 1 (5-8)", "(5-8)")
 
 
+def test_bibliographic_issue_record_rejects_doi_reference_lines():
+    assert _looks_like_bibliographic_issue_number_record(
+        "Appl. Phys. Rev. 2 (4) (2015) 041101, https://doi.org/10.1063/1.4935926. (3)",
+        "(3)",
+    )
+    assert _looks_like_bibliographic_issue_number_record(
+        "trade-off's, Mater. Today Proc. 5 (2) (2018) 3895-3902, https://doi.org/ (5-8)",
+        "(5-8)",
+    )
+    assert _looks_like_bibliographic_issue_number_record(
+        "(1-4) (2016) 389-405, https://doi.org/10.1007/s00170-015-7576-2.",
+        "(1-4)",
+    )
+    assert not _looks_like_bibliographic_issue_number_record(
+        r"\sigma = E\epsilon (2018) + 1 (3)",
+        "(3)",
+    )
+
+
 def test_append_missing_pdf_numbered_candidates_skips_bibliographic_issue_records(tmp_path):
     pdf_path = tmp_path / "paper.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")

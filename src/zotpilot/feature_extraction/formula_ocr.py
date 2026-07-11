@@ -5589,6 +5589,12 @@ def _looks_like_bibliographic_issue_number_record(text: str, equation_number: st
     normalized_number = _normalize_equation_number_token(equation_number).strip("()（）")
     if not normalized or not normalized_number:
         return False
+    if (
+        re.search(r"(?:https?://|doi\.org/|10\.\d{4,9}/)", normalized, re.IGNORECASE)
+        and re.search(r"(?:18|19|20)\d{2}", normalized)
+        and not _has_formula_relation(normalized)
+    ):
+        return True
     loose_number_pattern = _loose_equation_number_token_pattern(normalized_number)
     pdf_space = r"[\s\ue000-\uf8ff]*"
     if (
