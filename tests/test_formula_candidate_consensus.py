@@ -92,6 +92,38 @@ def test_candidate_consensus_flags_number_conflict_on_same_bbox():
     assert cluster["candidate_details"][1]["raw_text_preview"] == r"D = 1 - exp(-a epsilon_p)"
 
 
+def test_candidate_consensus_does_not_merge_truncated_conflicting_numbers():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 45,
+                "source": "pdf_text_equation_number_truncated",
+                "parser_label": "auto",
+                "equation_number": "(3-13)",
+                "bbox": [10, 20, 300, 80],
+                "raw_text_preview": "D_s = phi(theta, eta) ... (3-13) phi(theta, eta) = ...",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 45,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(3-14)",
+                "bbox": [12, 22, 299, 78],
+                "raw_text_preview": "(1 - xi^2)(1 - T_k) + T_k eta <= 0 (3-14)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
+
+
 def test_candidate_consensus_keeps_same_parser_different_numbers_separate():
     consensus = build_formula_candidate_consensus(
         [
@@ -123,6 +155,103 @@ def test_candidate_consensus_keeps_same_parser_different_numbers_separate():
     assert consensus["cluster_count"] == 2
     assert consensus["conflict_cluster_count"] == 0
     assert [cluster["primary_equation_number"] for cluster in consensus["clusters"]] == ["(7)", "(8)"]
+
+
+def test_candidate_consensus_keeps_same_number_different_page_formulas_separate():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 3,
+                "source": "pdf_text_equation_number",
+                "parser_label": "auto",
+                "equation_number": "(5)",
+                "bbox": [10, 20, 300, 48],
+                "raw_text_preview": r"\dot{\lambda} = f(\sigma) (5)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 6,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(5)",
+                "bbox": [40, 60, 220, 90],
+                "raw_text_preview": r"b_1 = b_3 + b_5 (5)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
+    assert [cluster["page_nums"] for cluster in consensus["clusters"]] == [[3], [6]]
+
+
+def test_candidate_consensus_keeps_same_source_numbered_and_unnumbered_variants_separate():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 45,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "",
+                "bbox": [10, 20, 300, 80],
+                "raw_text_preview": "phi(theta, eta) = 1 - xi^2 eta > 0",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 45,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(3-14)",
+                "bbox": [12, 22, 299, 78],
+                "raw_text_preview": "(1 - xi^2)(1 - T_k) + T_k eta <= 0 (3-14)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
+
+
+def test_candidate_consensus_keeps_cross_source_numbered_and_unnumbered_variants_separate():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 7,
+                "source": "mineru_content_list",
+                "parser_label": "auto",
+                "equation_number": "(1)",
+                "bbox": [10, 20, 300, 80],
+                "latex_preview": r"\sigma=A(\varepsilon_0+\varepsilon_p)^n",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 7,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "",
+                "bbox": [12, 22, 299, 78],
+                "raw_text_preview": "sigma = (1 - alpha) [A (epsilon_0 + epsilon_p)^n] +",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
 
 
 def test_candidate_consensus_clusters_same_page_latex_and_text_signature():
@@ -278,6 +407,67 @@ def test_candidate_consensus_normalizes_symbol_font_private_use_greek():
 
     assert consensus["cluster_count"] == 1
     assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_ignores_low_information_text_signature_conflict():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 84,
+                "source": "mineru_content_list",
+                "equation_number": "(6-1)",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"f_{0w}=f_{0b}+f_0^*",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 84,
+                "source": "text_layer",
+                "equation_number": "(6-1)",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "* 0 0 0 = + f f f 接头 母材 （ 6-1 ）",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["conflict_cluster_count"] == 0
+    assert consensus["supported_cluster_count"] == 1
+
+
+def test_candidate_consensus_ignores_operator_heavy_short_text_signature_conflict():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 10,
+                "source": "mineru_content_list",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\eta_0 = \frac{\sigma_1+\sigma_2+\sigma_3}{3\bar{\sigma}}",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 10,
+                "source": "text_layer",
+                "equation_number": "",
+                "bbox": [42, 102, 258, 131],
+                "raw_text_preview": "= = - - = - ( )( ) ξ σ",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["conflict_cluster_count"] == 0
 
 
 def test_candidate_consensus_keeps_different_same_page_formulas_separate():

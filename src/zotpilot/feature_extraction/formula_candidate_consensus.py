@@ -280,19 +280,27 @@ def _matching_cluster(clusters: list[dict[str, Any]], candidate: Mapping[str, An
 def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     left_number = str(left.get("normalized_equation_number", "") or "")
     right_number = str(right.get("normalized_equation_number", "") or "")
-    if left_number and right_number and left_number == right_number:
-        return True
-    if left_number and right_number and left_number != right_number:
-        return _same_formula_with_conflicting_numbers(left, right)
     left_page = _int_value(left.get("page_num"))
     right_page = _int_value(right.get("page_num"))
+    left_signature = str(left.get("latex_signature", "") or "")
+    right_signature = str(right.get("latex_signature", "") or "")
+    if left_number and right_number and left_number == right_number:
+        if left_page and left_page == right_page:
+            return True
+        return _formula_signatures_similar(left_signature, right_signature)
+    if left_number and right_number and left_number != right_number:
+        return _same_formula_with_conflicting_numbers(left, right)
     if left_page and left_page == right_page:
+        if bool(left_number) != bool(right_number):
+            return (
+                bool(left_signature)
+                and bool(right_signature)
+                and _formula_signatures_nearly_same(left_signature, right_signature)
+            )
         left_bbox = _bbox_value(left.get("bbox"))
         right_bbox = _bbox_value(right.get("bbox"))
         if len(left_bbox) == 4 and len(right_bbox) == 4 and _bbox_iou(left_bbox, right_bbox) >= 0.2:
             return True
-        left_signature = str(left.get("latex_signature", "") or "")
-        right_signature = str(right.get("latex_signature", "") or "")
         if left_signature and right_signature and left_signature == right_signature:
             return True
         if _formula_signatures_similar(left_signature, right_signature):
@@ -305,9 +313,9 @@ def _same_formula_with_conflicting_numbers(left: Mapping[str, Any], right: Mappi
     right_page = _int_value(right.get("page_num"))
     if not left_page or left_page != right_page:
         return False
-    if str(left.get("parser_label", "") or "") == str(right.get("parser_label", "") or "") and str(
-        left.get("source_group", "") or ""
-    ) == str(right.get("source_group", "") or ""):
+    if "truncated" in str(left.get("source", "") or "") or "truncated" in str(right.get("source", "") or ""):
+        return False
+    if _same_source_family(left, right):
         return False
     left_bbox = _bbox_value(left.get("bbox"))
     right_bbox = _bbox_value(right.get("bbox"))
@@ -317,6 +325,12 @@ def _same_formula_with_conflicting_numbers(left: Mapping[str, Any], right: Mappi
         str(left.get("latex_signature", "") or ""),
         str(right.get("latex_signature", "") or ""),
     )
+
+
+def _same_source_family(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return str(left.get("parser_label", "") or "") == str(right.get("parser_label", "") or "") and str(
+        left.get("source_group", "") or ""
+    ) == str(right.get("source_group", "") or "")
 
 
 def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -521,13 +535,46 @@ def _formula_signatures_similar(left: str, right: str) -> bool:
     return SequenceMatcher(None, left, right).ratio() >= 0.86 and jaccard >= 0.58
 
 
+def _formula_signatures_nearly_same(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if not _formula_signatures_similar(left, right):
+        return False
+    left_tokens = set(_formula_signature_tokens(left))
+    right_tokens = set(_formula_signature_tokens(right))
+    jaccard = len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
+    return SequenceMatcher(None, left, right).ratio() >= 0.9 and jaccard >= 0.72
+
+
 def _formula_signatures_have_conflict(signatures: set[str]) -> bool:
-    signature_list = sorted(signature for signature in signatures if signature)
+    signature_list = sorted(signature for signature in signatures if _formula_signature_is_informative(signature))
+    if len(signature_list) < 2:
+        return False
     for index, left in enumerate(signature_list):
         for right in signature_list[index + 1 :]:
             if not _formula_signatures_similar(left, right):
                 return True
     return False
+
+
+def _formula_signature_is_informative(signature: str) -> bool:
+    if not signature:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", signature):
+        return False
+    alpha_tokens = re.findall(r"[a-z]+", signature)
+    alpha_chars = sum(len(token) for token in alpha_tokens)
+    digit_chars = len(re.findall(r"\d", signature))
+    operator_chars = len(re.findall(r"[=+\-*/<>≤≥≈_^{}()]", signature))
+    if alpha_chars < 4:
+        return False
+    if len(set(alpha_tokens)) < 3 and digit_chars < 2:
+        return False
+    if operator_chars > alpha_chars * 2 and alpha_chars < 10:
+        return False
+    return True
 
 
 def _formula_signature_tokens(value: str) -> list[str]:
