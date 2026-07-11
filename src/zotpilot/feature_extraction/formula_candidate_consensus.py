@@ -120,9 +120,13 @@ _SIGNATURE_SYMBOL_REPLACEMENTS = {
     "×": "*",
     "≤": "<=",
     "≥": ">=",
+    "－": "-",
+    "–": "-",
+    "—": "-",
     "∑": "sum",
     "∫": "int",
     "√": "sqrt",
+    "槡": "sqrt",
     "ቀ": "(",
     "ቁ": ")",
     "൫": "(",
@@ -504,6 +508,7 @@ def _normalize_formula_signature(value: str) -> str:
         normalized = normalized.replace(greek, replacement)
     for symbol, replacement in _SIGNATURE_SYMBOL_REPLACEMENTS.items():
         normalized = normalized.replace(symbol, replacement)
+    normalized = _collapse_text_layer_subscript_hyphen(normalized)
     normalized = _collapse_text_layer_duplicate_math_tokens(normalized)
     normalized = re.sub(r"\\[a-z]+", "", normalized)
     normalized = re.sub(r"[_^]\s*\{\s*([^{}]+?)\s*\}", r"\1", normalized)
@@ -511,6 +516,11 @@ def _normalize_formula_signature(value: str) -> str:
     normalized = normalized.replace("{", "").replace("}", "")
     normalized = normalized.replace("¼", "=").replace("þ", "+").replace("−", "-")
     return normalized
+
+
+def _collapse_text_layer_subscript_hyphen(value: str) -> str:
+    greek_words = "|".join(re.escape(word) for word in _SIGNATURE_DUPLICATE_WORDS)
+    return re.sub(rf"\b({greek_words})\s*-\s*([a-z0-9])\b", r"\1\2", value)
 
 
 def _collapse_text_layer_duplicate_math_tokens(value: str) -> str:

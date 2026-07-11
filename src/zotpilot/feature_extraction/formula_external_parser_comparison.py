@@ -277,8 +277,10 @@ def _looks_like_opaque_text_layer_candidate_preview(preview: Mapping[str, Any]) 
     raw_text = str(preview.get("raw_text_preview", "") or "")
     if not raw_text:
         return False
-    private_use_count = sum(1 for char in raw_text if "\uf000" <= char <= "\uf8ff")
-    return private_use_count >= 2
+    private_use_count = sum(1 for char in raw_text if "\ue000" <= char <= "\uf8ff")
+    pdf_encoded_count = sum(1 for char in raw_text if char in "¼ðþÞ")
+    control_count = sum(1 for char in raw_text if ord(char) < 32 and char not in "\t\r\n")
+    return private_use_count >= 2 or pdf_encoded_count >= 2 or control_count >= 2
 
 
 def _row_map(estimate: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

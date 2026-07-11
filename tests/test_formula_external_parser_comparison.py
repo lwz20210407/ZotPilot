@@ -370,6 +370,66 @@ def test_external_parser_comparison_routes_opaque_text_layer_evidence_separately
     assert row["parser_summaries"]["text"]["opaque_text_layer_candidate_count"] == 1
 
 
+def test_external_parser_comparison_routes_pdf_encoded_text_layer_evidence_separately():
+    structured_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_ENCODED_TEXT",
+                "title": "Encoded text-layer paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 8,
+                        "source": "mineru_content_list",
+                        "equation_number": "(4)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"\Delta T=\frac{\beta_T}{\rho C_v}\int\sigma d\varepsilon",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ],
+    }
+    encoded_text_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_ENCODED_TEXT",
+                "title": "Encoded text-layer paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"text_layer": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 8,
+                        "source": "text_layer",
+                        "equation_number": "",
+                        "bbox": [320, 300, 520, 330],
+                        "raw_text_preview": "A ¼ D x D z ð 1 þ \ue5ce \ue5ce",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"auto": structured_estimate, "text": encoded_text_estimate}
+    )
+
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["opaque_text_layer_candidate_evidence"]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+    assert comparison["comparison_flag_counts"] == {"opaque_text_layer_candidate_evidence": 1}
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+    assert row["parser_summaries"]["text"]["opaque_text_layer_candidate_count"] == 1
+
+
 def test_external_parser_comparison_flags_truncated_candidate_previews():
     first_estimate = {
         "candidate_count": 3,
