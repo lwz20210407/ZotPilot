@@ -1116,6 +1116,61 @@ def _print_formula_backfill_estimate(result: dict, *, preview_limit: int = 0) ->
                 )
 
 
+def _print_formula_candidate_audit_report(report: dict, *, preview_limit: int = 0) -> None:
+    estimate = report.get("estimate", {})
+    review = report.get("provider_cross_review", {})
+    print("Formula candidate provider audit:")
+    print(f"  Papers:                    {review.get('paper_count', 0)}")
+    print(f"  Formula candidates:        {review.get('candidate_count', 0)}")
+    print(f"  Candidate provider:        {review.get('candidate_provider', '')}")
+    print(f"  OCR fallback provider:     {review.get('provider', '')}")
+    print(f"  SimpleTex role:            {review.get('simpletex_role', '')}")
+    print(f"  External fallback calls:   {review.get('external_call_count', 0)}")
+    print(f"  Read-only index changed:   {'yes' if review.get('readonly_index_changed') else 'no'}")
+    route_counts = review.get("route_counts") or {}
+    if route_counts:
+        print("\nQuality routes:")
+        for route, count in sorted(route_counts.items()):
+            print(f"  - {route}: {count}")
+    provider_group_totals = review.get("provider_group_totals") or {}
+    if provider_group_totals:
+        print("\nProvider evidence:")
+        for group, count in sorted(provider_group_totals.items()):
+            print(f"  - {group}: {count}")
+    print(
+        "\nSemantic unmatched papers: "
+        f"{review.get('semantic_unmatched_reference_paper_count', 0)}"
+    )
+    rows = review.get("rows") or []
+    if rows:
+        print("\nReview rows:")
+        for row in rows[:10]:
+            traceability = row.get("traceability") or {}
+            flags = row.get("review_flags") or []
+            print(
+                f"  - {row.get('item_key')}: {row.get('quality_route')} "
+                f"candidates={row.get('candidate_count')} "
+                f"pages={traceability.get('page_min')}-{traceability.get('page_max')} "
+                f"bbox={traceability.get('bbox_present_count')}/"
+                f"{traceability.get('bbox_present_count', 0) + traceability.get('bbox_missing_count', 0)} "
+                f"recommendation={row.get('write_recommendation')}"
+            )
+            if flags:
+                print(f"    flags: {', '.join(str(flag) for flag in flags[:8])}")
+        if len(rows) > 10:
+            print("  - ... use --json to inspect all rows")
+    summary = estimate.get("summary", {}) if isinstance(estimate, dict) else {}
+    if summary.get("next_action"):
+        print(f"\nNext: {summary['next_action']}")
+    warnings = summary.get("warnings") or []
+    if warnings:
+        print("\nWarnings:")
+        for warning in warnings:
+            print(f"  - {warning}")
+    if preview_limit != 0:
+        _print_formula_backfill_estimate(estimate, preview_limit=preview_limit)
+
+
 def _unmatched_requested_item_count(result: dict[str, object]) -> int:
     count = result.get("unmatched_requested_item_key_count")
     if count is not None:
@@ -1399,11 +1454,8 @@ def cmd_index_formulas(args):
     return _formula_backfill_exit_code(args, result)
 
 
-def cmd_estimate_formula_backfill(args):
-    """Estimate formula backfill volume without OCR calls or index writes."""
-    from .indexer import ConfigDriftError, Indexer
-    from .vector_store import IndexUnavailableError
-
+def _formula_estimate_config_from_args(args):
+    """Resolve formula-estimate config while allowing read-only SimpleTex estimates."""
     config = _with_formula_pdf_number_options(
         resolve_runtime_config(args.config),
         cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
@@ -1417,7 +1469,12 @@ def cmd_estimate_formula_backfill(args):
     if blocking_errors:
         for e in blocking_errors:
             print(f"Config error: {e}", file=sys.stderr)
-        return 1
+        return None
+    return config
+
+
+def _formula_estimate_kwargs_from_args(args) -> tuple[dict[str, object], int]:
+    """Build estimate kwargs shared by formula estimate and audit commands."""
     preview_limit = (
         -1
         if getattr(args, "preview_all_candidates", False)
@@ -1443,6 +1500,18 @@ def cmd_estimate_formula_backfill(args):
     }
     if hasattr(args, "include_high_density"):
         estimate_kwargs["include_high_density"] = getattr(args, "include_high_density", False)
+    return estimate_kwargs, preview_limit
+
+
+def cmd_estimate_formula_backfill(args):
+    """Estimate formula backfill volume without OCR calls or index writes."""
+    from .indexer import ConfigDriftError, Indexer
+    from .vector_store import IndexUnavailableError
+
+    config = _formula_estimate_config_from_args(args)
+    if config is None:
+        return 1
+    estimate_kwargs, preview_limit = _formula_estimate_kwargs_from_args(args)
     try:
         result = _call_with_json_stdout_guard(
             lambda: Indexer.for_formula_estimate(config).estimate_formula_backfill(**estimate_kwargs),
@@ -1460,8 +1529,40 @@ def cmd_estimate_formula_backfill(args):
     return _formula_estimate_exit_code(args, result)
 
 
+def cmd_audit_formula_candidates(args):
+    """Build a read-only provider cross-review report for formula candidates."""
+    from .feature_extraction.formula_provider_review import build_formula_provider_cross_review
+    from .indexer import ConfigDriftError, Indexer
+    from .vector_store import IndexUnavailableError
+
+    config = _formula_estimate_config_from_args(args)
+    if config is None:
+        return 1
+    estimate_kwargs, preview_limit = _formula_estimate_kwargs_from_args(args)
+    try:
+        estimate = _call_with_json_stdout_guard(
+            lambda: Indexer.for_formula_estimate(config).estimate_formula_backfill(**estimate_kwargs),
+            json_output=args.json,
+        )
+    except (ConfigDriftError, IndexUnavailableError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    report = {
+        "mode": "read_only_formula_candidate_audit",
+        "estimate": estimate,
+        "provider_cross_review": build_formula_provider_cross_review(estimate),
+    }
+    if args.json:
+        _print_json(report, ensure_ascii=False, indent=2)
+        return _formula_estimate_exit_code(args, estimate)
+
+    _print_formula_candidate_audit_report(report, preview_limit=preview_limit)
+    return _formula_estimate_exit_code(args, estimate)
+
+
 def _validate_formula_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.command not in {"index-formulas", "estimate-formula-backfill"}:
+    if args.command not in {"index-formulas", "estimate-formula-backfill", "audit-formula-candidates"}:
         return
     preview_chars = getattr(args, "preview_chars", 0)
     if preview_chars is not None and preview_chars < 0:
@@ -2795,6 +2896,123 @@ def main(argv: list[str] | None = None) -> int:
     sub_formula_estimate.add_argument("--json", action="store_true", help="Output the full estimate as JSON")
     sub_formula_estimate.add_argument("--config", type=str, default=None, help="Config file path")
     sub_formula_estimate.set_defaults(func=cmd_estimate_formula_backfill)
+
+    # audit-formula-candidates
+    sub_formula_audit = subparsers.add_parser(
+        "audit-formula-candidates",
+        help="Build a read-only provider cross-review report for formula candidates",
+    )
+    formula_audit_scope = sub_formula_audit.add_mutually_exclusive_group()
+    formula_audit_scope.add_argument("--item-key", type=str, default=None, help="Audit one Zotero item key")
+    formula_audit_scope.add_argument(
+        "--item-keys",
+        nargs="+",
+        default=None,
+        help="Audit a space-separated list of Zotero item keys",
+    )
+    sub_formula_audit.add_argument("--limit", type=int, default=None, help="Max already-indexed papers to scan")
+    sub_formula_audit.add_argument(
+        "--sample-size",
+        type=int,
+        default=None,
+        help="Randomly sample N matched already-indexed papers for read-only formula auditing",
+    )
+    sub_formula_audit.add_argument(
+        "--sample-seed",
+        type=int,
+        default=0,
+        help="Seed for --sample-size so random validation batches are reproducible",
+    )
+    sub_formula_audit.add_argument(
+        "--exclude-item-keys",
+        nargs="+",
+        default=None,
+        help="Exclude these Zotero item keys from --sample-size random validation",
+    )
+    sub_formula_audit.add_argument(
+        "--exclude-item-keys-file",
+        type=str,
+        default=None,
+        help="Read excluded Zotero item keys from a text or JSON file for --sample-size validation",
+    )
+    sub_formula_audit.add_argument("--resume-after", type=str, default=None, help="Resume audit after this item key")
+    sub_formula_audit.add_argument(
+        "--daily-call-budget",
+        type=int,
+        default=None,
+        help="Daily call budget to use for estimated run count",
+    )
+    sub_formula_audit.add_argument(
+        "--preview-candidates",
+        type=int,
+        default=0,
+        help="Show up to N formula candidate previews per paper without OCR or index writes",
+    )
+    sub_formula_audit.add_argument(
+        "--preview-all-candidates",
+        action="store_true",
+        help="Include every formula candidate in the read-only preview",
+    )
+    sub_formula_audit.add_argument(
+        "--preview-chars",
+        type=int,
+        default=160,
+        help="Max characters per raw_text/latex preview; 0 keeps the full text",
+    )
+    sub_formula_audit.add_argument(
+        "--pdf-fallback-max-pages",
+        type=int,
+        default=None,
+        help=(
+            "Max PDF pages to scan for fallback equation-number candidates; "
+            "0 scans the full document for reviewed theses/books"
+        ),
+    )
+    sub_formula_audit.add_argument(
+        "--cache-pdf-number-enrichment",
+        action="store_true",
+        help="Explicitly open PDFs to enrich equation numbers for cached LaTeX",
+    )
+    sub_formula_audit.add_argument(
+        "--append-missing-pdf-number-candidates",
+        action="store_true",
+        help="Add missing numbered PDF formula candidates for reviewed gaps during the audit estimate",
+    )
+    sub_formula_audit.add_argument(
+        "--include-high-density",
+        action="store_true",
+        help="Use full candidate scanning for high-density formula documents after reviewing the estimate",
+    )
+    sub_formula_audit.add_argument(
+        "--page-min",
+        type=int,
+        default=None,
+        help="Only audit formula candidates on or after this 1-based PDF page; single-item audits only",
+    )
+    sub_formula_audit.add_argument(
+        "--page-max",
+        type=int,
+        default=None,
+        help="Only audit formula candidates on or before this 1-based PDF page; single-item audits only",
+    )
+    sub_formula_audit.add_argument(
+        "--fail-on-candidate-quality-blocked",
+        action="store_true",
+        help="Return exit code 4 when audit finds candidate quality blocking papers",
+    )
+    sub_formula_audit.add_argument(
+        "--fail-on-unmatched",
+        action="store_true",
+        help="Return exit code 5 when requested item keys are not matched",
+    )
+    sub_formula_audit.add_argument(
+        "--fail-on-readonly-index-changed",
+        action="store_true",
+        help="Return exit code 6 when the Chroma index changes during this read-only audit",
+    )
+    sub_formula_audit.add_argument("--json", action="store_true", help="Output the full audit as JSON")
+    sub_formula_audit.add_argument("--config", type=str, default=None, help="Config file path")
+    sub_formula_audit.set_defaults(func=cmd_audit_formula_candidates)
 
     # status
     sub_status = subparsers.add_parser("status", help="Show config and index stats")

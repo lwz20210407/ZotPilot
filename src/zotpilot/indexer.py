@@ -928,6 +928,12 @@ def _formula_candidate_audit(candidates: list) -> dict[str, object]:
         for candidate in candidates
         if isinstance((page_num := getattr(candidate, "page_num", None)), int) and page_num > 0
     ]
+    page_tagged_count = len(page_nums)
+    bbox_present_count = sum(
+        1
+        for candidate in candidates
+        if len(getattr(candidate, "bbox", ()) or ()) == 4
+    )
     equation_numbers = [
         number
         for candidate in audit_ordered_candidates
@@ -1010,6 +1016,10 @@ def _formula_candidate_audit(candidates: list) -> dict[str, object]:
         "page_min": min(page_nums) if page_nums else 0,
         "page_max": max(page_nums) if page_nums else 0,
         "page_count_with_candidates": len(set(page_nums)),
+        "page_tagged_count": page_tagged_count,
+        "page_missing_count": len(candidates) - page_tagged_count,
+        "bbox_present_count": bbox_present_count,
+        "bbox_missing_count": len(candidates) - bbox_present_count,
         "first_equation_number": equation_numbers[0] if equation_numbers else "",
         "last_equation_number": equation_numbers[-1] if equation_numbers else "",
         **equation_number_audit,

@@ -2183,3 +2183,123 @@ def test_estimate_formula_backfill_cli_can_export_all_candidate_preview(capsys):
         sample_seed=0,
         exclude_item_keys=None,
     )
+
+
+def test_audit_formula_candidates_cli_outputs_provider_cross_review_json(capsys):
+    from zotpilot.cli import cmd_audit_formula_candidates
+
+    config = MagicMock()
+    config.validate.return_value = ["SimpleTex formula OCR requires formula_ocr_simpletex_token"]
+    indexer = MagicMock()
+    indexer.estimate_formula_backfill.return_value = {
+        "provider": "simpletex",
+        "candidate_provider": "auto",
+        "processed": 1,
+        "candidate_count": 1,
+        "estimated_provider_calls": 1,
+        "estimated_external_calls": 1,
+        "daily_call_budget": 10,
+        "data_egress": True,
+        "readonly_index_changed": False,
+        "summary": {"next_action": "Review provider evidence.", "warnings": []},
+        "results": [
+            {
+                "item_key": "DOC1",
+                "title": "Paper",
+                "candidate_count": 1,
+                "estimated_external_calls": 1,
+                "candidate_audit": {
+                    "candidate_count": 1,
+                    "source_counts": {"mineru_content_list": 1},
+                    "ocr_needed_count": 1,
+                    "cached_latex_count": 0,
+                    "page_min": 1,
+                    "page_max": 1,
+                    "page_count_with_candidates": 1,
+                    "page_tagged_count": 1,
+                    "page_missing_count": 0,
+                    "bbox_present_count": 1,
+                    "bbox_missing_count": 0,
+                    "numbered_count": 1,
+                    "unnumbered_count": 0,
+                    "first_equation_number": "(1)",
+                    "last_equation_number": "(1)",
+                    "equation_number_warnings": [],
+                },
+            }
+        ],
+        "formula_quality_route_summary": [
+            {
+                "item_key": "DOC1",
+                "quality_route": "auto_candidate",
+                "route_reason": "candidate_quality_clear",
+            }
+        ],
+    }
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", return_value=config),
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", return_value=indexer),
+    ):
+        rc = cmd_audit_formula_candidates(
+            SimpleNamespace(
+                config="config.json",
+                item_key="DOC1",
+                item_keys=None,
+                limit=10,
+                resume_after="DOC0",
+                daily_call_budget=10,
+                preview_candidates=1,
+                preview_all_candidates=False,
+                preview_chars=160,
+                pdf_fallback_max_pages=0,
+                cache_pdf_number_enrichment=True,
+                append_missing_pdf_number_candidates=False,
+                page_min=None,
+                page_max=None,
+                sample_size=None,
+                sample_seed=0,
+                exclude_item_keys=None,
+                exclude_item_keys_file=None,
+                include_high_density=False,
+                fail_on_candidate_quality_blocked=False,
+                fail_on_unmatched=False,
+                fail_on_readonly_index_changed=False,
+                json=True,
+            )
+        )
+
+    payload = json.loads(capsys.readouterr().out)
+    review = payload["provider_cross_review"]
+    assert rc == 0
+    assert payload["mode"] == "read_only_formula_candidate_audit"
+    assert review["simpletex_role"] == "fallback_recognizer_only"
+    assert review["provider_group_totals"] == {"mineru_cache": 1}
+    assert review["rows"][0]["simpletex_external_call_count"] == 1
+    assert config.formula_candidate_cache_pdf_number_enrichment is True
+    indexer.estimate_formula_backfill.assert_called_once_with(
+        item_key="DOC1",
+        item_keys=None,
+        limit=10,
+        resume_after="DOC0",
+        daily_call_budget=10,
+        candidate_preview_limit=1,
+        candidate_preview_chars=160,
+        pdf_fallback_max_pages=0,
+        page_min=None,
+        page_max=None,
+        sample_size=None,
+        sample_seed=0,
+        exclude_item_keys=None,
+        include_high_density=False,
+    )
+
+
+def test_audit_formula_candidates_parser_rejects_page_window_without_single_item_scope():
+    from zotpilot.cli import main
+
+    with patch("zotpilot.cli.resolve_runtime_config", side_effect=AssertionError("config should not load")):
+        with pytest.raises(SystemExit) as exc:
+            main(["audit-formula-candidates", "--item-keys", "DOC1", "DOC2", "--page-min", "4"])
+
+    assert exc.value.code == 2
