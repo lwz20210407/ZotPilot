@@ -47,6 +47,8 @@ def test_candidate_consensus_clusters_same_formula_across_structured_providers()
         "pdf_extract_kit": 1,
     }
     assert first_cluster["review_flags"] == ["multi_provider_agreement"]
+    assert first_cluster["representative_latex_preview"] == r"\sigma = E\varepsilon"
+    assert first_cluster["candidate_details"][0]["source"] == "mineru_content_list"
 
 
 def test_candidate_consensus_flags_number_conflict_on_same_bbox():
@@ -80,3 +82,4 @@ def test_candidate_consensus_flags_number_conflict_on_same_bbox():
     cluster = consensus["clusters"][0]
     assert "equation_number_conflict" in cluster["conflict_flags"]
     assert "ocr_fallback_required" in cluster["review_flags"]
+    assert cluster["candidate_details"][1]["raw_text_preview"] == r"D = 1 - exp(-a epsilon_p)"

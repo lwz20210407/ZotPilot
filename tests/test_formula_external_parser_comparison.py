@@ -69,6 +69,8 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
     cluster = row["candidate_consensus"]["clusters"][0]
     assert cluster["parser_label_counts"] == {"mineru": 1, "pdf_extract_kit": 1}
     assert cluster["source_group_counts"] == {"mineru_cache": 1, "pdf_extract_kit": 1}
+    assert cluster["candidate_details"][0]["parser_label"] == "mineru"
+    assert cluster["candidate_details"][1]["parser_label"] == "pdf_extract_kit"
 
 
 def test_external_parser_comparison_routes_conflicts_to_manual_review():

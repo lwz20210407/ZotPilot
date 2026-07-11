@@ -198,9 +198,32 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
         "primary_equation_number": sorted(set(equation_numbers))[0] if equation_numbers else "",
         "has_latex_count": sum(1 for candidate in candidates if candidate["has_latex"]),
         "needs_ocr_count": sum(1 for candidate in candidates if candidate["needs_ocr"]),
+        "representative_latex_preview": _first_non_empty(
+            str(candidate["latex_preview"] or "")
+            for candidate in candidates
+        ),
+        "representative_raw_text_preview": _first_non_empty(
+            str(candidate["raw_text_preview"] or "")
+            for candidate in candidates
+        ),
         "review_flags": flags,
         "conflict_flags": conflict_flags,
         "candidate_indices": [int(candidate["candidate_index"]) for candidate in candidates],
+        "candidate_details": [
+            {
+                "candidate_index": int(candidate["candidate_index"]),
+                "parser_label": str(candidate["parser_label"] or ""),
+                "source": str(candidate["source"] or ""),
+                "source_group": str(candidate["source_group"] or ""),
+                "page_num": int(candidate["page_num"]),
+                "equation_number": str(candidate["equation_number"] or ""),
+                "has_latex": bool(candidate["has_latex"]),
+                "needs_ocr": bool(candidate["needs_ocr"]),
+                "latex_preview": str(candidate["latex_preview"] or ""),
+                "raw_text_preview": str(candidate["raw_text_preview"] or ""),
+            }
+            for candidate in candidates
+        ],
     }
 
 
@@ -293,3 +316,10 @@ def _float_value(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _first_non_empty(values: Iterable[str]) -> str:
+    for value in values:
+        if value:
+            return value
+    return ""
