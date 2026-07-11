@@ -151,6 +151,10 @@ def _comparison_row(
             1 for summary in parser_summaries.values()
             if _parser_summary_has_opaque_text_layer_evidence(summary)
         ),
+        number_only_pdf_fallback_parser_count=sum(
+            1 for summary in parser_summaries.values()
+            if _parser_summary_has_number_only_pdf_fallback_evidence(summary)
+        ),
         preview_candidate_count=_int_value(consensus.get("preview_candidate_count")),
         consensus=consensus,
     )
@@ -188,6 +192,10 @@ def _parser_row_summary(row: Mapping[str, Any]) -> dict[str, Any]:
             1 for preview in previews
             if _looks_like_opaque_text_layer_candidate_preview(preview)
         ),
+        "number_only_pdf_fallback_candidate_count": sum(
+            1 for preview in previews
+            if _looks_like_number_only_pdf_fallback_candidate_preview(preview)
+        ),
     }
 
 
@@ -198,6 +206,7 @@ def _comparison_flags(
     candidate_counts: list[int],
     preview_counts: list[int],
     opaque_parser_count: int,
+    number_only_pdf_fallback_parser_count: int,
     preview_candidate_count: int,
     consensus: Mapping[str, Any],
 ) -> list[str]:
@@ -225,6 +234,8 @@ def _comparison_flags(
     ):
         if opaque_parser_count:
             flags.append("opaque_text_layer_candidate_evidence")
+        elif number_only_pdf_fallback_parser_count:
+            flags.append("number_only_pdf_fallback_evidence")
         else:
             flags.append("no_cross_parser_candidate_overlap")
     return flags
@@ -250,6 +261,8 @@ def _write_recommendation(
         return "manual_review_queue"
     if "parser_without_candidates" in flags or "opaque_text_layer_candidate_evidence" in flags:
         return "single_parser_candidate_review"
+    if "number_only_pdf_fallback_evidence" in flags:
+        return "single_parser_candidate_review"
     if flags == ["candidate_count_mismatch"] and multi_provider_count > 0:
         return "partial_cross_parser_support_review_extras"
     if flags:
@@ -271,6 +284,14 @@ def _parser_summary_has_opaque_text_layer_evidence(summary: Mapping[str, Any]) -
     return opaque_count >= threshold
 
 
+def _parser_summary_has_number_only_pdf_fallback_evidence(summary: Mapping[str, Any]) -> bool:
+    preview_count = _int_value(summary.get("preview_candidate_count"))
+    if preview_count <= 0:
+        return False
+    count = _int_value(summary.get("number_only_pdf_fallback_candidate_count"))
+    return count > 0
+
+
 def _looks_like_opaque_text_layer_candidate_preview(preview: Mapping[str, Any]) -> bool:
     if source_group(str(preview.get("source", "") or "")) != "pdf_text_layer":
         return False
@@ -281,6 +302,18 @@ def _looks_like_opaque_text_layer_candidate_preview(preview: Mapping[str, Any]) 
     pdf_encoded_count = sum(1 for char in raw_text if char in "¼ðþÞ")
     control_count = sum(1 for char in raw_text if ord(char) < 32 and char not in "\t\r\n")
     return private_use_count >= 2 or pdf_encoded_count >= 2 or control_count >= 2
+
+
+def _looks_like_number_only_pdf_fallback_candidate_preview(preview: Mapping[str, Any]) -> bool:
+    source = str(preview.get("source", "") or "")
+    if not source.startswith("pdf_text_equation_number"):
+        return False
+    raw_text = str(preview.get("raw_text_preview", "") or "").strip()
+    equation_number = str(preview.get("equation_number", "") or "").strip()
+    if not raw_text or not equation_number or str(preview.get("latex_preview", "") or "").strip():
+        return False
+    number = equation_number.strip("()（）")
+    return bool(number and raw_text.strip(" \t\r\n()（）ðÞ") == number)
 
 
 def _row_map(estimate: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -336,6 +369,7 @@ def _parser_candidate_summary(
         candidate_count = 0
         preview_candidate_count = 0
         opaque_text_layer_candidate_count = 0
+        number_only_pdf_fallback_candidate_count = 0
         quality_routes: Counter[str] = Counter()
         source_groups: Counter[str] = Counter()
         for row in rows:
@@ -346,6 +380,9 @@ def _parser_candidate_summary(
             candidate_count += _int_value(parser_summary.get("candidate_count"))
             preview_candidate_count += _int_value(parser_summary.get("preview_candidate_count"))
             opaque_text_layer_candidate_count += _int_value(parser_summary.get("opaque_text_layer_candidate_count"))
+            number_only_pdf_fallback_candidate_count += _int_value(
+                parser_summary.get("number_only_pdf_fallback_candidate_count")
+            )
             quality_route = str(parser_summary.get("quality_route", "") or "unknown")
             quality_routes[quality_route] += 1
             source_groups.update(_dict_value(parser_summary.get("source_group_counts")))
@@ -354,6 +391,7 @@ def _parser_candidate_summary(
             "candidate_count": candidate_count,
             "preview_candidate_count": preview_candidate_count,
             "opaque_text_layer_candidate_count": opaque_text_layer_candidate_count,
+            "number_only_pdf_fallback_candidate_count": number_only_pdf_fallback_candidate_count,
             "quality_route_counts": dict(sorted(quality_routes.items())),
             "source_group_counts": dict(sorted(source_groups.items())),
         }

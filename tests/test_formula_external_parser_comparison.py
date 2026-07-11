@@ -83,6 +83,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "quality_route_counts": {"unknown": 1},
             "source_group_counts": {"mineru_cache": 1},
             "opaque_text_layer_candidate_count": 0,
+            "number_only_pdf_fallback_candidate_count": 0,
         },
         "pdf_extract_kit": {
             "paper_count": 1,
@@ -91,6 +92,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "quality_route_counts": {"unknown": 1},
             "source_group_counts": {"pdf_extract_kit": 1},
             "opaque_text_layer_candidate_count": 0,
+            "number_only_pdf_fallback_candidate_count": 0,
         },
     }
     row = comparison["rows"][0]
@@ -428,6 +430,66 @@ def test_external_parser_comparison_routes_pdf_encoded_text_layer_evidence_separ
     assert comparison["comparison_flag_counts"] == {"opaque_text_layer_candidate_evidence": 1}
     assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
     assert row["parser_summaries"]["text"]["opaque_text_layer_candidate_count"] == 1
+
+
+def test_external_parser_comparison_routes_number_only_pdf_fallback_separately():
+    text_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_NUMBER_ONLY",
+                "title": "Number-only fallback paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"text_layer": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 10,
+                        "source": "text_layer",
+                        "equation_number": "(4)",
+                        "bbox": [80, 120, 520, 142],
+                        "raw_text_preview": "Exp = (Pu/Ag)Exp (4)",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ],
+    }
+    number_only_estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC_NUMBER_ONLY",
+                "title": "Number-only fallback paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"pdf_text_equation_number": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 10,
+                        "source": "pdf_text_equation_number",
+                        "equation_number": "(3)",
+                        "bbox": [540, 418, 560, 431],
+                        "raw_text_preview": "(3)",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"auto": number_only_estimate, "text": text_estimate}
+    )
+
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["number_only_pdf_fallback_evidence"]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+    assert comparison["comparison_flag_counts"] == {"number_only_pdf_fallback_evidence": 1}
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+    assert row["parser_summaries"]["auto"]["number_only_pdf_fallback_candidate_count"] == 1
 
 
 def test_external_parser_comparison_flags_truncated_candidate_previews():
