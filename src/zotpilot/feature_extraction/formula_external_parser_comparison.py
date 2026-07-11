@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -155,6 +156,10 @@ def _comparison_row(
             1 for summary in parser_summaries.values()
             if _parser_summary_has_number_only_pdf_fallback_evidence(summary)
         ),
+        weak_text_layer_fragment_parser_count=sum(
+            1 for summary in parser_summaries.values()
+            if _parser_summary_has_weak_text_layer_fragment_evidence(summary)
+        ),
         preview_candidate_count=_int_value(consensus.get("preview_candidate_count")),
         consensus=consensus,
     )
@@ -196,6 +201,10 @@ def _parser_row_summary(row: Mapping[str, Any]) -> dict[str, Any]:
             1 for preview in previews
             if _looks_like_number_only_pdf_fallback_candidate_preview(preview)
         ),
+        "weak_text_layer_fragment_candidate_count": sum(
+            1 for preview in previews
+            if _looks_like_weak_text_layer_fragment_candidate_preview(preview)
+        ),
     }
 
 
@@ -207,6 +216,7 @@ def _comparison_flags(
     preview_counts: list[int],
     opaque_parser_count: int,
     number_only_pdf_fallback_parser_count: int,
+    weak_text_layer_fragment_parser_count: int,
     preview_candidate_count: int,
     consensus: Mapping[str, Any],
 ) -> list[str]:
@@ -236,6 +246,8 @@ def _comparison_flags(
             flags.append("opaque_text_layer_candidate_evidence")
         elif number_only_pdf_fallback_parser_count:
             flags.append("number_only_pdf_fallback_evidence")
+        elif weak_text_layer_fragment_parser_count:
+            flags.append("weak_text_layer_fragment_evidence")
         else:
             flags.append("no_cross_parser_candidate_overlap")
     return flags
@@ -261,7 +273,7 @@ def _write_recommendation(
         return "manual_review_queue"
     if "parser_without_candidates" in flags or "opaque_text_layer_candidate_evidence" in flags:
         return "single_parser_candidate_review"
-    if "number_only_pdf_fallback_evidence" in flags:
+    if "number_only_pdf_fallback_evidence" in flags or "weak_text_layer_fragment_evidence" in flags:
         return "single_parser_candidate_review"
     if flags == ["candidate_count_mismatch"] and multi_provider_count > 0:
         return "partial_cross_parser_support_review_extras"
@@ -292,6 +304,17 @@ def _parser_summary_has_number_only_pdf_fallback_evidence(summary: Mapping[str, 
     return count > 0
 
 
+def _parser_summary_has_weak_text_layer_fragment_evidence(summary: Mapping[str, Any]) -> bool:
+    preview_count = _int_value(summary.get("preview_candidate_count"))
+    if preview_count <= 0 or preview_count > 3:
+        return False
+    source_counts = _dict_value(summary.get("source_group_counts"))
+    if set(source_counts) != {"pdf_text_layer"}:
+        return False
+    count = _int_value(summary.get("weak_text_layer_fragment_candidate_count"))
+    return count == preview_count
+
+
 def _looks_like_opaque_text_layer_candidate_preview(preview: Mapping[str, Any]) -> bool:
     if source_group(str(preview.get("source", "") or "")) != "pdf_text_layer":
         return False
@@ -314,6 +337,20 @@ def _looks_like_number_only_pdf_fallback_candidate_preview(preview: Mapping[str,
         return False
     number = equation_number.strip("()（）")
     return bool(number and raw_text.strip(" \t\r\n()（）ðÞ") == number)
+
+
+def _looks_like_weak_text_layer_fragment_candidate_preview(preview: Mapping[str, Any]) -> bool:
+    if source_group(str(preview.get("source", "") or "")) != "pdf_text_layer":
+        return False
+    if str(preview.get("latex_preview", "") or "").strip() or str(preview.get("equation_number", "") or "").strip():
+        return False
+    raw_text = str(preview.get("raw_text_preview", "") or "").strip()
+    if not raw_text or len(raw_text) > 120:
+        return False
+    normalized = re.sub(r"\s+", "", raw_text)
+    if re.search(r"(?:=|¼|þ|≈|≤|≥|≠|<|>|\\(?:leq?|geq?|approx|sim))", normalized):
+        return False
+    return normalized.endswith("/") or len(re.findall(r"/\s*(?:mm|cm|m|s|pa|mpa|gpa|%)", raw_text, re.IGNORECASE)) >= 1
 
 
 def _row_map(estimate: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -370,6 +407,7 @@ def _parser_candidate_summary(
         preview_candidate_count = 0
         opaque_text_layer_candidate_count = 0
         number_only_pdf_fallback_candidate_count = 0
+        weak_text_layer_fragment_candidate_count = 0
         quality_routes: Counter[str] = Counter()
         source_groups: Counter[str] = Counter()
         for row in rows:
@@ -383,6 +421,9 @@ def _parser_candidate_summary(
             number_only_pdf_fallback_candidate_count += _int_value(
                 parser_summary.get("number_only_pdf_fallback_candidate_count")
             )
+            weak_text_layer_fragment_candidate_count += _int_value(
+                parser_summary.get("weak_text_layer_fragment_candidate_count")
+            )
             quality_route = str(parser_summary.get("quality_route", "") or "unknown")
             quality_routes[quality_route] += 1
             source_groups.update(_dict_value(parser_summary.get("source_group_counts")))
@@ -392,6 +433,7 @@ def _parser_candidate_summary(
             "preview_candidate_count": preview_candidate_count,
             "opaque_text_layer_candidate_count": opaque_text_layer_candidate_count,
             "number_only_pdf_fallback_candidate_count": number_only_pdf_fallback_candidate_count,
+            "weak_text_layer_fragment_candidate_count": weak_text_layer_fragment_candidate_count,
             "quality_route_counts": dict(sorted(quality_routes.items())),
             "source_group_counts": dict(sorted(source_groups.items())),
         }

@@ -84,6 +84,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "source_group_counts": {"mineru_cache": 1},
             "opaque_text_layer_candidate_count": 0,
             "number_only_pdf_fallback_candidate_count": 0,
+            "weak_text_layer_fragment_candidate_count": 0,
         },
         "pdf_extract_kit": {
             "paper_count": 1,
@@ -93,6 +94,7 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
             "source_group_counts": {"pdf_extract_kit": 1},
             "opaque_text_layer_candidate_count": 0,
             "number_only_pdf_fallback_candidate_count": 0,
+            "weak_text_layer_fragment_candidate_count": 0,
         },
     }
     row = comparison["rows"][0]
@@ -490,6 +492,86 @@ def test_external_parser_comparison_routes_number_only_pdf_fallback_separately()
     assert comparison["comparison_flag_counts"] == {"number_only_pdf_fallback_evidence": 1}
     assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
     assert row["parser_summaries"]["auto"]["number_only_pdf_fallback_candidate_count"] == 1
+
+
+def test_external_parser_comparison_routes_weak_text_layer_fragments_separately():
+    structured_estimate = {
+        "candidate_count": 2,
+        "results": [
+            {
+                "item_key": "DOC_WEAK_TEXT",
+                "title": "Weak text fragments paper",
+                "candidate_count": 2,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 2}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 10,
+                        "source": "mineru_content_list",
+                        "equation_number": "",
+                        "bbox": [40, 100, 260, 130],
+                        "latex_preview": r"E_t=\frac{T_b-T_r}{d_t}",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    },
+                    {
+                        "candidate_index": 1,
+                        "page_num": 10,
+                        "source": "mineru_content_list",
+                        "equation_number": "",
+                        "bbox": [40, 150, 260, 180],
+                        "latex_preview": r"E_m=\frac{T_b-T_r}{d_t}\frac{\rho_b}{\rho_t}",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ],
+    }
+    weak_text_estimate = {
+        "candidate_count": 2,
+        "results": [
+            {
+                "item_key": "DOC_WEAK_TEXT",
+                "title": "Weak text fragments paper",
+                "candidate_count": 2,
+                "candidate_audit": {"source_counts": {"text_layer": 2}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 10,
+                        "source": "text_layer",
+                        "equation_number": "",
+                        "bbox": [280, 500, 520, 530],
+                        "raw_text_preview": "T_r /mm T_b /mm",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    },
+                    {
+                        "candidate_index": 1,
+                        "page_num": 10,
+                        "source": "text_layer",
+                        "equation_number": "",
+                        "bbox": [280, 540, 520, 570],
+                        "raw_text_preview": "T_b - T_r /",
+                        "has_latex": False,
+                        "needs_ocr": True,
+                    },
+                ],
+            }
+        ],
+    }
+
+    comparison = build_formula_external_parser_comparison(
+        {"auto": structured_estimate, "text": weak_text_estimate}
+    )
+
+    row = comparison["rows"][0]
+    assert row["comparison_flags"] == ["weak_text_layer_fragment_evidence"]
+    assert row["write_recommendation"] == "single_parser_candidate_review"
+    assert comparison["comparison_flag_counts"] == {"weak_text_layer_fragment_evidence": 1}
+    assert comparison["write_recommendation_counts"] == {"single_parser_candidate_review": 1}
+    assert row["parser_summaries"]["text"]["weak_text_layer_fragment_candidate_count"] == 2
 
 
 def test_external_parser_comparison_flags_truncated_candidate_previews():
