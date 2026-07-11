@@ -290,6 +290,15 @@ def _print_json(data, *, indent: int | None = 2, ensure_ascii: bool = False) -> 
     sys.stdout.write("\n")
 
 
+def _write_json_file(path: str | None, data) -> None:
+    """Write CLI JSON artifacts using UTF-8."""
+    if not path:
+        return
+    output_path = Path(path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _import_register_secret_overrides(args, config_path: Path) -> bool:
     imported_any = False
     if getattr(args, "gemini_key", None):
@@ -1708,6 +1717,11 @@ def cmd_compare_formula_parsers(args):
             )
         comparison = build_formula_external_parser_comparison(reports)
     except (ConfigDriftError, IndexUnavailableError, OSError, json.JSONDecodeError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    try:
+        _write_json_file(getattr(args, "output", None), comparison)
+    except OSError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     if args.json:
@@ -3331,6 +3345,12 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-manual-review",
         action="store_true",
         help="Return exit code 8 when any paper is routed to manual review",
+    )
+    sub_formula_compare.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Write the full comparison report to this JSON file",
     )
     sub_formula_compare.add_argument("--json", action="store_true", help="Output the full comparison as JSON")
     sub_formula_compare.add_argument("--config", type=str, default=None, help="Config file path")

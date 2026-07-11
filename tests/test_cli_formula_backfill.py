@@ -2464,6 +2464,57 @@ def test_compare_formula_parsers_cli_outputs_json_without_loading_config(tmp_pat
     assert payload["rows"][0]["write_recommendation"] == "candidate_supported_by_cross_parser_review"
 
 
+def test_compare_formula_parsers_cli_writes_output_file(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    output_path = tmp_path / "reports" / "comparison.json"
+    estimate = {
+        "candidate_count": 1,
+        "results": [
+            {
+                "item_key": "DOC1",
+                "title": "Paper",
+                "candidate_count": 1,
+                "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                "candidate_preview": [
+                    {
+                        "candidate_index": 0,
+                        "page_num": 1,
+                        "source": "mineru_content_list",
+                        "equation_number": "(1)",
+                        "bbox": [10, 20, 300, 48],
+                        "latex_preview": r"E = mc^2",
+                        "has_latex": True,
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ],
+    }
+    first_path.write_text(json.dumps(estimate), encoding="utf-8")
+    second_path.write_text(json.dumps(estimate), encoding="utf-8")
+
+    rc = main(
+        [
+            "compare-formula-parsers",
+            "--estimate",
+            f"first={first_path}",
+            "--estimate",
+            f"second={second_path}",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert rc == 0
+    assert "Formula external parser comparison:" in capsys.readouterr().out
+    saved = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved["mode"] == "read_only_external_parser_comparison"
+    assert saved["parser_labels"] == ["first", "second"]
+
+
 def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):
     from zotpilot.cli import main
 
