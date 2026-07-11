@@ -4234,6 +4234,39 @@ class TestFormulaBackfill:
         assert result["readonly_index_snapshot_after"] == after
         assert any("changed during this read-only estimate" in warning for warning in result["summary"]["warnings"])
 
+    def test_estimate_formula_backfill_limit_uses_indexed_keys_before_zotero_pdf_scan(self, tmp_path):
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ZoteroItem
+
+        pdf1 = tmp_path / "doc1.pdf"
+        pdf2 = tmp_path / "doc2.pdf"
+        pdf1.write_bytes(b"%PDF-1.4")
+        pdf2.write_bytes(b"%PDF-1.4")
+        items = {
+            "DOC1": ZoteroItem("DOC1", "Paper 1", "Auth", 2024, pdf1),
+            "DOC2": ZoteroItem("DOC2", "Paper 2", "Auth", 2024, pdf2),
+        }
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1", "DOC2"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.side_effect = AssertionError(
+            "limit=1 should not enumerate the full Zotero PDF library"
+        )
+        indexer.zotero.get_item.side_effect = lambda key: items.get(key)
+        indexer.zotero.resolve_original_pdf_path = lambda *_args, **_kwargs: None
+        indexer._assert_config_hash_current = MagicMock()
+
+        with patch("zotpilot.feature_extraction.formula_ocr.extract_formula_candidates", return_value=[]):
+            result = indexer.estimate_formula_backfill(limit=1)
+
+        assert result["processed"] == 1
+        assert result["summary"]["selected"] == 1
+        assert result["summary"]["matched"] == 2
+        indexer.zotero.get_all_items_with_pdfs.assert_not_called()
+        indexer.zotero.get_item.assert_called_once_with("DOC1")
+
     def test_estimate_formula_backfill_preview_can_include_all_candidates_without_truncation(self, tmp_path):
         from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
         from zotpilot.indexer import Indexer

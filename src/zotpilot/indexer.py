@@ -3588,27 +3588,38 @@ class Indexer:
         else:
             sample_excluded_indexed_key_count = 0
             sampled_unresolved_key_count = 0
-            matched_items = self._formula_backfill_candidate_items(
-                item_key=item_key,
-                item_keys=item_keys,
-            )
-            matched_keys = {item.item_key for item in matched_items}
-            unmatched_requested_item_keys = [
-                key for key in requested_keys
-                if key and key not in matched_keys
-            ]
-            resume_after_found = (
-                resume_after is None
-                or resume_after in matched_keys
-            )
-            raw_items = self._formula_backfill_candidate_items(
-                item_key=item_key,
-                item_keys=item_keys,
-                limit=limit,
-                resume_after=resume_after,
-            )
+            if not item_key and not item_keys and (limit or resume_after):
+                indexed_keys = sorted(self.store.get_indexed_doc_ids())
+                matched_keys = set(indexed_keys)
+                unmatched_requested_item_keys = []
+                resume_after_found = resume_after is None or resume_after in matched_keys
+                candidate_keys = _keys_after_resume(indexed_keys, resume_after) if resume_after else indexed_keys
+                if limit:
+                    candidate_keys = candidate_keys[:limit]
+                raw_items = self._formula_backfill_items_for_indexed_keys(candidate_keys)
+                matched_count = len(indexed_keys)
+            else:
+                matched_items = self._formula_backfill_candidate_items(
+                    item_key=item_key,
+                    item_keys=item_keys,
+                )
+                matched_keys = {item.item_key for item in matched_items}
+                unmatched_requested_item_keys = [
+                    key for key in requested_keys
+                    if key and key not in matched_keys
+                ]
+                resume_after_found = (
+                    resume_after is None
+                    or resume_after in matched_keys
+                )
+                raw_items = self._formula_backfill_candidate_items(
+                    item_key=item_key,
+                    item_keys=item_keys,
+                    limit=limit,
+                    resume_after=resume_after,
+                )
+                matched_count = len(matched_items)
             sampled_from = len(raw_items)
-            matched_count = len(matched_items)
         request_complete = not unmatched_requested_item_keys
         items, skipped_items = self._filter_formula_backfill_original_items(raw_items)
 
