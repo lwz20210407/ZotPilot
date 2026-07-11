@@ -520,7 +520,9 @@ def _normalize_formula_signature(value: str) -> str:
 
 def _collapse_text_layer_subscript_hyphen(value: str) -> str:
     greek_words = "|".join(re.escape(word) for word in _SIGNATURE_DUPLICATE_WORDS)
-    return re.sub(rf"\b({greek_words})\s*-\s*([a-z0-9])\b", r"\1\2", value)
+    normalized = re.sub(rf"\b({greek_words})\s*-\s*([a-z0-9])\b", r"\1\2", value)
+    normalized = re.sub(rf"\b({greek_words})\s+([a-z0-9])\s*-\s*=", r"\1\2=", normalized)
+    return re.sub(rf"\b((?:{greek_words})[a-z0-9]*)\s*-\s*=", r"\1=", normalized)
 
 
 def _collapse_text_layer_duplicate_math_tokens(value: str) -> str:

@@ -473,6 +473,38 @@ def test_candidate_consensus_normalizes_cjk_pdf_text_sqrt_and_subscript_markers(
     assert consensus["supported_cluster_count"] == 1
 
 
+def test_candidate_consensus_normalizes_cjk_pdf_text_subscript_dash_before_equals():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 2,
+                "source": "mineru_content_list",
+                "parser_label": "auto",
+                "equation_number": "",
+                "bbox": [40, 100, 260, 130],
+                "latex_preview": r"\bar{\varepsilon}_{f} = a e^{b\eta}",
+                "has_latex": True,
+                "needs_ocr": False,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 2,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "",
+                "bbox": [280, 500, 520, 530],
+                "raw_text_preview": "ε f － = a e b η",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 1
+    assert consensus["supported_cluster_count"] == 1
+
+
 def test_candidate_consensus_ignores_low_information_text_signature_conflict():
     consensus = build_formula_candidate_consensus(
         [
