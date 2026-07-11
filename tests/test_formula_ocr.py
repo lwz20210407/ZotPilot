@@ -2275,9 +2275,20 @@ def test_non_formula_text_rejects_text_layer_table_header_unit_rows():
         "Refs. Rod material V 0 /(m $ s 1 ) DOP-T/mm DOP-S/mm "
         "P = d -T P = d -S l -T/mm l -S/mm"
     )
+    mechanical_property_rows = (
+        "硬度 HV5 ≥2400 ≥2200 抗弯强度 MPa ≥380 ≥400 "
+        "密度 g·cm -3 ≥3.14 ≥3.10 碳化硅 % ≥99 ≥99"
+    )
+    figure_panel_dimensions = "(a) d =5.8 mm (b) d =8.0 mm (c) d =9.8 mm"
 
     assert _looks_like_non_formula_text(material_table_header)
     assert _looks_like_non_formula_text(ballistic_table_header)
+    assert _looks_like_non_formula_text(mechanical_property_rows)
+    assert _looks_like_non_formula_text("碳化硅 % ≥99 ≥99")
+    assert _looks_like_non_formula_text("材料 ρ /(kg·m -3 ) G /GPa A /MPa B /MPa n C m T m /K")
+    assert _looks_like_non_formula_text("ρ /(kg/m 3")
+    assert _looks_like_non_formula_text(figure_panel_dimensions)
+    assert _looks_like_non_formula_text("L = 10 mm L = 15 mm L = 20 mm L = 80 mm")
     assert not _looks_like_non_formula_text(r"\sigma = 100\ \mathrm{MPa} (1)")
     assert not _looks_like_non_formula_text(
         r"\dot{\epsilon}_{ij} = \dot{\epsilon}^{e}_{ij} + \dot{\epsilon}^{p}_{ij} (A1a)"

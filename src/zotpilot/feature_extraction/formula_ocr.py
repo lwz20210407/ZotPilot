@@ -151,7 +151,8 @@ STRUCTURED_TABLE_UNIT_RE = re.compile(
 )
 TEXT_LAYER_TABLE_HEADER_TOKEN_RE = re.compile(
     r"\b(?:refs?|materials?|specimens?|samples?|parameters?|rod|target|plate|"
-    r"projectile|velocity|thickness|diameter|density|temperature|DOP)\b",
+    r"projectile|velocity|thickness|diameter|density|temperature|DOP)\b|"
+    r"(?:材料|参数|密度|硬度|强度)",
     re.IGNORECASE,
 )
 TEXT_LAYER_CHEMICAL_COMPOSITION_TOKEN_RE = re.compile(
@@ -161,7 +162,8 @@ TEXT_LAYER_CHEMICAL_COMPOSITION_TOKEN_RE = re.compile(
 TEXT_LAYER_TABLE_UNIT_TOKEN_RE = re.compile(
     r"(?:\([^)]{0,40}\b(?:kg|g|GPa|MPa|Pa|K|mm|cm|m|s|J|N|kN|Hz|mol|W|%)\b[^)]{0,40}\)|"
     r"/\s*(?:[A-Za-zµμ°$][A-Za-z0-9µμ°$^(). -]{0,24})|"
-    r"\b(?:GPa|MPa|Pa|kg|J|K|mm|cm|DOP-[A-Za-z]+)\b)",
+    r"\b(?:GPa|MPa|Pa|kg|g|J|K|mm|cm|HV\d*|DOP-[A-Za-z]+)\b|%|"
+    r"(?:密度|硬度|抗弯强度|抗压强度|屈服强度|拉伸强度))",
     re.IGNORECASE,
 )
 VARIABLE_GLOSS_RE = re.compile(r"\bwhere\b[^.。;；]{0,260}|其中[^.。;；]{0,260}|式中[^.。;；]{0,260}", re.IGNORECASE)
@@ -5533,9 +5535,7 @@ def _looks_like_figure_panel_dimension_number_block(text: str) -> bool:
     normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
     if not normalized:
         return False
-    panel_labels = re.findall(r"\(\s*\d{1,2}\s*\)", normalized)
-    if len(panel_labels) < 2:
-        return False
+    panel_labels = re.findall(r"\(\s*(?:\d{1,2}|[a-h])\s*\)", normalized, flags=re.IGNORECASE)
     dimension_assignments = re.findall(
         r"(?<![A-Za-z])(?:h|w|l|d|t|r|a|b|c)\s*={1,2}\s*"
         r"\d+(?:\.\d+)?\s*(?:mm|cm|um|μm|nm|m)\b",
@@ -5543,6 +5543,8 @@ def _looks_like_figure_panel_dimension_number_block(text: str) -> bool:
         flags=re.IGNORECASE,
     )
     if len(dimension_assignments) < 2:
+        return False
+    if len(panel_labels) < 2 and len(dimension_assignments) < 3:
         return False
     if re.search(r"\\[A-Za-z]+|[∑∏∫√∞∂∇]|[Α-Ωα-ω]", normalized):
         return False
@@ -6454,6 +6456,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
         return True
     if _looks_like_text_layer_table_header_or_unit_row(normalized):
         return True
+    if _looks_like_figure_panel_dimension_number_block(normalized):
+        return True
     if _looks_like_text_layer_garbled_or_prose_noise(normalized):
         return True
 
@@ -6494,7 +6498,7 @@ def _looks_like_non_formula_text(text: str) -> bool:
 
 def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
     normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
-    if len(normalized) < 20:
+    if len(normalized) < 8:
         return False
     header_hits = len(TEXT_LAYER_TABLE_HEADER_TOKEN_RE.findall(normalized))
     chemical_hits = len(TEXT_LAYER_CHEMICAL_COMPOSITION_TOKEN_RE.findall(normalized))
@@ -6514,6 +6518,15 @@ def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
     if header_hits >= 1 and unit_hits >= 4:
         return True
     if re.match(r"\s*Refs?\.", normalized, re.IGNORECASE) and (unit_hits >= 2 or slash_hits >= 2):
+        return True
+    comparison_hits = len(re.findall(r"[≥≤<>]\s*\d", normalized))
+    if unit_hits >= 1 and comparison_hits >= 2 and strong_formula_markers == 0:
+        return True
+    if CJK_CHAR_RE.search(normalized) and unit_hits >= 1 and comparison_hits >= 1 and strong_formula_markers == 0:
+        return True
+    if header_hits >= 1 and unit_hits >= 2 and relation_hits <= 4 and strong_formula_markers == 0:
+        return True
+    if re.fullmatch(r"\s*[Α-Ωα-ωA-Za-z]+\s*/\s*\([^)]{0,30}\s*", normalized):
         return True
     if unit_hits >= 5 and word_hits >= 5 and relation_hits <= 2 and strong_formula_markers == 0:
         return True
