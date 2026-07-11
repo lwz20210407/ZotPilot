@@ -64,8 +64,14 @@ PROSE_TEXT_COMMAND_RE = re.compile(
 )
 WORD_RE = re.compile(r"[A-Za-z]{3,}")
 CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
-EQUATION_NUMBER_PATTERN = r"(?:[A-Za-z][.:]\s*)?\d+(?:(?:\.|-)\d+)*(?:[A-Za-z])?"
-PDF_EQUATION_NUMBER_PATTERN = r"(?:[A-Za-z][.:]\s*)?\d+(?:(?:[.:]|[-–—－−])\d+)*(?:[-–—－−])?(?:[A-Za-z])?"
+EQUATION_NUMBER_PATTERN = (
+    r"(?:(?:[A-Za-z][.:]\s*)?\d+(?:(?:\.|-)\d+)*(?:[A-Za-z])?"
+    r"|[A-Za-z]\d+(?:(?:\.|-)\d+)*(?:[A-Za-z])?)"
+)
+PDF_EQUATION_NUMBER_PATTERN = (
+    r"(?:(?:[A-Za-z][.:]\s*)?\d+(?:(?:[.:]|[-–—－−])\d+)*(?:[-–—－−])?(?:[A-Za-z])?"
+    r"|[A-Za-z]\d+(?:(?:[.:]|[-–—－−])\d+)*(?:[-–—－−])?(?:[A-Za-z])?)"
+)
 EQUATION_NUMBER_RE = re.compile(
     rf"(?:\bEq\.?\s*\(\s*(?P<eq>{EQUATION_NUMBER_PATTERN})\s*\)|"
     rf"[=+\-*/<>≤≥≈≠∑∏∫√∞∂∇_{{}}^][^()\n]{{0,180}}\(\s*(?P<tail>{EQUATION_NUMBER_PATTERN})\s*\)\s*$)",
@@ -135,6 +141,17 @@ STRUCTURED_TABLE_UNIT_RE = re.compile(
     r"(?:G\s*p\s*a|M\s*P\s*a|k\s*N|m\s*m|s\s*\^\s*\{\s*-\s*1\s*\}|"
     r"\^\s*\{\s*\\circ\s*\}\s*C|°\s*C|D\s*e\s*f\.|"
     r"\bA\s*l\b|\bS\s*i\b|\bF\s*e\b|\bC\s*u\b|\bM\s*n\b|\bM\s*g\b|\bC\s*r\b|\bZ\s*n\b)",
+    re.IGNORECASE,
+)
+TEXT_LAYER_TABLE_HEADER_TOKEN_RE = re.compile(
+    r"\b(?:refs?|materials?|specimens?|samples?|parameters?|rod|target|plate|"
+    r"projectile|velocity|thickness|diameter|density|temperature|DOP)\b",
+    re.IGNORECASE,
+)
+TEXT_LAYER_TABLE_UNIT_TOKEN_RE = re.compile(
+    r"(?:\([^)]{0,40}\b(?:kg|g|GPa|MPa|Pa|K|mm|cm|m|s|J|N|kN|Hz|mol|W|%)\b[^)]{0,40}\)|"
+    r"/\s*(?:[A-Za-zµμ°$][A-Za-z0-9µμ°$^(). -]{0,24})|"
+    r"\b(?:GPa|MPa|Pa|kg|J|K|mm|cm|DOP-[A-Za-z]+)\b)",
     re.IGNORECASE,
 )
 VARIABLE_GLOSS_RE = re.compile(r"\bwhere\b[^.。;；]{0,260}|其中[^.。;；]{0,260}|式中[^.。;；]{0,260}", re.IGNORECASE)
@@ -6375,6 +6392,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
         return True
     if _looks_like_unlabeled_numeric_matrix_fragment(normalized):
         return True
+    if _looks_like_text_layer_table_header_or_unit_row(normalized):
+        return True
 
     symbol_hits = len(MATH_SYMBOL_RE.findall(normalized))
     word_hits = len(WORD_RE.findall(normalized))
@@ -6409,6 +6428,30 @@ def _looks_like_non_formula_text(text: str) -> bool:
     if word_hits > 4 and symbol_density < 0.04:
         return True
     return symbol_hits < 2
+
+
+def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if len(normalized) < 20:
+        return False
+    header_hits = len(TEXT_LAYER_TABLE_HEADER_TOKEN_RE.findall(normalized))
+    unit_hits = len(TEXT_LAYER_TABLE_UNIT_TOKEN_RE.findall(normalized))
+    slash_hits = normalized.count("/")
+    relation_hits = len(
+        re.findall(rf"(?:=|¼|≈|≤|≥|≠|:=|\\leq?|\\geq?|\\approx|\\sim|{PRIVATE_USE_RELATION_RE})", normalized)
+    )
+    word_hits = len(WORD_RE.findall(normalized))
+    strong_formula_markers = len(re.findall(r"[∑∏∫√∞∂∇∆]|\\(?:frac|sqrt|sum|prod|int|partial|nabla)\b", normalized))
+
+    if header_hits >= 2 and unit_hits >= 2 and word_hits >= 4:
+        return True
+    if header_hits >= 1 and unit_hits >= 4:
+        return True
+    if re.match(r"\s*Refs?\.", normalized, re.IGNORECASE) and (unit_hits >= 2 or slash_hits >= 2):
+        return True
+    if unit_hits >= 5 and word_hits >= 5 and relation_hits <= 2 and strong_formula_markers == 0:
+        return True
+    return False
 
 
 def _looks_like_unlabeled_numeric_matrix_fragment(text: str) -> bool:

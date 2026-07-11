@@ -722,6 +722,12 @@ def test_extract_equation_number_accepts_spaced_tail_number():
     ) == "(A.5)"
     assert (
         _extract_equation_number(
+            r"\dot{\epsilon}_{ij} = \dot{\epsilon}^{e}_{ij} + \dot{\epsilon}^{p}_{ij} ( A1a )"
+        )
+        == "(A1a)"
+    )
+    assert (
+        _extract_equation_number(
             "By substituting Eqs. (2), (7a), and (7b) into Eq. (1), respectively, "
             "we have ( sigma_0_PS - x(epsilon_p) )^6 * "
             "(a1 + a2 A + a3 A^2 + a4 A^3) = sigma_0^6(epsilon_p) (8a)"
@@ -2251,6 +2257,24 @@ def test_enumerated_list_item_record_rejects_parenthetical_numbers():
 def test_non_formula_text_rejects_crystallographic_plane_sequence():
     assert _looks_like_non_formula_text("β (110) β (200) β (211)")
     assert not _looks_like_non_formula_text(r"\beta = \sigma_{110} + \sigma_{200} (211)")
+
+
+def test_non_formula_text_rejects_text_layer_table_header_unit_rows():
+    material_table_header = (
+        "Material r (kg/m 3 ) E (GPa) n (-) C v J/(kg $ K) "
+        "T r (K) T m (K) _ ε 0 (s 1 )"
+    )
+    ballistic_table_header = (
+        "Refs. Rod material V 0 /(m $ s 1 ) DOP-T/mm DOP-S/mm "
+        "P = d -T P = d -S l -T/mm l -S/mm"
+    )
+
+    assert _looks_like_non_formula_text(material_table_header)
+    assert _looks_like_non_formula_text(ballistic_table_header)
+    assert not _looks_like_non_formula_text(r"\sigma = 100\ \mathrm{MPa} (1)")
+    assert not _looks_like_non_formula_text(
+        r"\dot{\epsilon}_{ij} = \dot{\epsilon}^{e}_{ij} + \dot{\epsilon}^{p}_{ij} (A1a)"
+    )
 
 
 def test_equation_reference_prose_rejects_defined_in_eq_reference():
@@ -6461,6 +6485,10 @@ def test_equation_number_detection_avoids_plain_step_numbers():
     assert _extract_equation_number("E = mc^2 (1)") == "(1)"
     assert _extract_equation_number(r"\sigma_y = A + B\epsilon_p^n (1.10)") == "(1.10)"
     assert _extract_equation_number(r"\dot{\epsilon} = \dot{\epsilon}_0 e^{Q/RT} (3.2.1)") == "(3.2.1)"
+    assert (
+        _extract_equation_number(r"\dot{\epsilon}_{ij} = \dot{\epsilon}^{e}_{ij} + \dot{\epsilon}^{p}_{ij} (A1a)")
+        == "(A1a)"
+    )
     assert _extract_equation_number("Eq. (3)") == "(3)"
     assert _extract_equation_number("Follow step (3)") == ""
     assert _extract_equation_number("(1) (2)") == ""
