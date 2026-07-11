@@ -287,6 +287,8 @@ def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -
     if left_number and right_number and left_number == right_number:
         if left_page and left_page == right_page:
             return True
+        if not left_page or not right_page or abs(left_page - right_page) > 1:
+            return False
         return _formula_signatures_similar(left_signature, right_signature)
     if left_number and right_number and left_number != right_number:
         return _same_formula_with_conflicting_numbers(left, right)

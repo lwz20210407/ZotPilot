@@ -190,6 +190,38 @@ def test_candidate_consensus_keeps_same_number_different_page_formulas_separate(
     assert [cluster["page_nums"] for cluster in consensus["clusters"]] == [[3], [6]]
 
 
+def test_candidate_consensus_keeps_far_page_repeated_numbers_separate_even_when_similar():
+    consensus = build_formula_candidate_consensus(
+        [
+            {
+                "candidate_index": 0,
+                "page_num": 76,
+                "source": "text_layer",
+                "parser_label": "auto",
+                "equation_number": "(1)",
+                "bbox": [10, 20, 300, 48],
+                "raw_text_preview": "x = 1/2 (1)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+            {
+                "candidate_index": 1,
+                "page_num": 165,
+                "source": "text_layer",
+                "parser_label": "text",
+                "equation_number": "(1)",
+                "bbox": [40, 60, 220, 90],
+                "raw_text_preview": "x = 1/2 (1)",
+                "has_latex": False,
+                "needs_ocr": True,
+            },
+        ]
+    )
+
+    assert consensus["cluster_count"] == 2
+    assert consensus["conflict_cluster_count"] == 0
+
+
 def test_candidate_consensus_keeps_same_source_numbered_and_unnumbered_variants_separate():
     consensus = build_formula_candidate_consensus(
         [

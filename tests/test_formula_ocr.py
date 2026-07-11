@@ -2288,6 +2288,7 @@ def test_non_formula_text_rejects_garbled_text_layer_headers_and_prose():
     assert _looks_like_non_formula_text("M+17)/+,0\\2/7*27+*AW*G/*77)/*G ! !;;> ! Z$%9 $ !#%N!>9")
     assert _looks_like_non_formula_text("!;;! ! 9; $ #>;N#<$")
     assert _looks_like_non_formula_text(">#!N>#<")
+    assert _looks_like_non_formula_text("If D ( n + 1 ) ≥ 1 THEN remove corresponding element END IF")
     assert not _looks_like_non_formula_text("𝜀𝜀̇ 1 = (𝜆𝜆 𝑐𝑐 −1 + 𝜀𝜀 ∗ ) 𝑞𝑞 ∗ (5)")
     assert not _looks_like_non_formula_text(r"\sigma = [A + B(\varepsilon^p)^n] (1)")
 

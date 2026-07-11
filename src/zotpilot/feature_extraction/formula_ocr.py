@@ -6390,6 +6390,8 @@ def _looks_like_non_formula_text(text: str) -> bool:
         return True
     if _looks_like_crystallographic_plane_sequence_text(normalized):
         return True
+    if _looks_like_algorithmic_control_flow_text(normalized):
+        return True
     if _looks_like_unlabeled_numeric_matrix_fragment(normalized):
         return True
     if _looks_like_text_layer_table_header_or_unit_row(normalized):
@@ -6454,6 +6456,16 @@ def _looks_like_text_layer_table_header_or_unit_row(text: str) -> bool:
     if unit_hits >= 5 and word_hits >= 5 and relation_hits <= 2 and strong_formula_markers == 0:
         return True
     return False
+
+
+def _looks_like_algorithmic_control_flow_text(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", _normalize_space(text or ""))
+    if not normalized:
+        return False
+    return bool(
+        re.search(r"\bif\b.{0,120}\bthen\b", normalized, re.IGNORECASE)
+        and re.search(r"\b(?:end\s+if|remove|delete|corresponding|element)\b", normalized, re.IGNORECASE)
+    )
 
 
 def _looks_like_text_layer_garbled_or_prose_noise(text: str) -> bool:
