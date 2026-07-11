@@ -1275,6 +1275,33 @@ def _print_formula_parser_comparison(report: dict) -> None:
         print("\nCandidate counts:")
         for label, count in sorted(candidate_counts.items()):
             print(f"  - {label}: {count}")
+    recommendation_counts = report.get("write_recommendation_counts") or {}
+    if recommendation_counts:
+        print("\nWrite recommendations:")
+        for label, count in sorted(recommendation_counts.items()):
+            print(f"  - {label}: {count}")
+    flag_counts = report.get("comparison_flag_counts") or {}
+    if flag_counts:
+        print("\nComparison flags:")
+        for label, count in sorted(flag_counts.items()):
+            print(f"  - {label}: {count}")
+    parser_summaries = report.get("parser_candidate_summary") or {}
+    if parser_summaries:
+        print("\nParser summaries:")
+        for label, summary in sorted(parser_summaries.items()):
+            if not isinstance(summary, dict):
+                continue
+            quality_routes = summary.get("quality_route_counts") or {}
+            route_text = ", ".join(
+                f"{route}={count}"
+                for route, count in sorted(quality_routes.items())
+            )
+            print(
+                f"  - {label}: papers={summary.get('paper_count', 0)} "
+                f"candidates={summary.get('candidate_count', 0)} "
+                f"preview={summary.get('preview_candidate_count', 0)}"
+                + (f" routes=({route_text})" if route_text else "")
+            )
     rows = report.get("rows") or []
     if rows:
         print("\nRows:")

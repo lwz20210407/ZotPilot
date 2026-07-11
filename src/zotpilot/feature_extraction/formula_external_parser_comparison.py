@@ -17,10 +17,11 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
         if isinstance(report, Mapping)
     }
     rows = _comparison_rows(estimates)
+    parser_labels = sorted(estimates)
     return {
         "mode": "read_only_external_parser_comparison",
         "parser_count": len(estimates),
-        "parser_labels": sorted(estimates),
+        "parser_labels": parser_labels,
         "readonly_index_changed": any(bool(estimate.get("readonly_index_changed")) for estimate in estimates.values()),
         "readonly_index_changed_by_parser": {
             label: bool(estimate.get("readonly_index_changed"))
@@ -52,6 +53,9 @@ def build_formula_external_parser_comparison(named_reports: Mapping[str, Mapping
             1 for row in rows
             if row["write_recommendation"] == "manual_review_queue"
         ),
+        "comparison_flag_counts": _comparison_flag_counts(rows),
+        "write_recommendation_counts": _write_recommendation_counts(rows),
+        "parser_candidate_summary": _parser_candidate_summary(rows, parser_labels),
         "rows": rows,
     }
 
@@ -205,6 +209,51 @@ def _source_group_counts(source_counts: Mapping[str, Any]) -> Counter[str]:
     for source, count in source_counts.items():
         groups[source_group(str(source))] += _int_value(count)
     return groups
+
+
+def _comparison_flag_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts.update(str(flag) for flag in _list_value(row.get("comparison_flags")))
+    return dict(sorted(counts.items()))
+
+
+def _write_recommendation_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts[str(row.get("write_recommendation", "") or "unknown")] += 1
+    return dict(sorted(counts.items()))
+
+
+def _parser_candidate_summary(
+    rows: list[dict[str, Any]],
+    parser_labels: list[str],
+) -> dict[str, dict[str, Any]]:
+    summaries: dict[str, dict[str, Any]] = {}
+    for label in parser_labels:
+        row_count = 0
+        candidate_count = 0
+        preview_candidate_count = 0
+        quality_routes: Counter[str] = Counter()
+        source_groups: Counter[str] = Counter()
+        for row in rows:
+            parser_summary = _dict_value(_dict_value(row.get("parser_summaries")).get(label))
+            if not parser_summary:
+                continue
+            row_count += 1
+            candidate_count += _int_value(parser_summary.get("candidate_count"))
+            preview_candidate_count += _int_value(parser_summary.get("preview_candidate_count"))
+            quality_route = str(parser_summary.get("quality_route", "") or "unknown")
+            quality_routes[quality_route] += 1
+            source_groups.update(_dict_value(parser_summary.get("source_group_counts")))
+        summaries[label] = {
+            "paper_count": row_count,
+            "candidate_count": candidate_count,
+            "preview_candidate_count": preview_candidate_count,
+            "quality_route_counts": dict(sorted(quality_routes.items())),
+            "source_group_counts": dict(sorted(source_groups.items())),
+        }
+    return summaries
 
 
 def _unwrap_estimate(report: Mapping[str, Any]) -> Mapping[str, Any]:

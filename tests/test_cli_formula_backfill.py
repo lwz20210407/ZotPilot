@@ -2509,10 +2509,17 @@ def test_compare_formula_parsers_cli_writes_output_file(tmp_path, capsys):
     )
 
     assert rc == 0
-    assert "Formula external parser comparison:" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Formula external parser comparison:" in output
+    assert "Write recommendations:" in output
+    assert "candidate_supported_by_cross_parser_review: 1" in output
+    assert "Parser summaries:" in output
     saved = json.loads(output_path.read_text(encoding="utf-8"))
     assert saved["mode"] == "read_only_external_parser_comparison"
     assert saved["parser_labels"] == ["first", "second"]
+    assert saved["write_recommendation_counts"] == {
+        "candidate_supported_by_cross_parser_review": 1
+    }
 
 
 def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):

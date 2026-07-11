@@ -63,6 +63,26 @@ def test_external_parser_comparison_accepts_cross_parser_consensus():
     assert comparison["paper_count"] == 1
     assert comparison["multi_provider_cluster_count"] == 1
     assert comparison["conflict_cluster_count"] == 0
+    assert comparison["comparison_flag_counts"] == {}
+    assert comparison["write_recommendation_counts"] == {
+        "candidate_supported_by_cross_parser_review": 1
+    }
+    assert comparison["parser_candidate_summary"] == {
+        "mineru": {
+            "paper_count": 1,
+            "candidate_count": 1,
+            "preview_candidate_count": 1,
+            "quality_route_counts": {"unknown": 1},
+            "source_group_counts": {"mineru_cache": 1},
+        },
+        "pdf_extract_kit": {
+            "paper_count": 1,
+            "candidate_count": 1,
+            "preview_candidate_count": 1,
+            "quality_route_counts": {"unknown": 1},
+            "source_group_counts": {"pdf_extract_kit": 1},
+        },
+    }
     row = comparison["rows"][0]
     assert row["comparison_flags"] == []
     assert row["write_recommendation"] == "candidate_supported_by_cross_parser_review"
@@ -143,6 +163,11 @@ def test_external_parser_comparison_routes_conflicts_to_manual_review():
         "candidate_consensus_conflicts",
     }
     assert row["write_recommendation"] == "manual_review_queue"
+    assert comparison["comparison_flag_counts"] == {
+        "candidate_consensus_conflicts": 1,
+        "candidate_count_mismatch": 1,
+    }
+    assert comparison["write_recommendation_counts"] == {"manual_review_queue": 1}
 
 
 def test_external_parser_comparison_tracks_readonly_index_change():
