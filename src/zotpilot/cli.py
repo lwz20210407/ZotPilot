@@ -227,6 +227,20 @@ def _split_named_path(value: str) -> tuple[str, str]:
     return label, path
 
 
+def _parse_formula_candidate_provider_specs(values: list[str] | None) -> list[tuple[str, str]]:
+    """Parse repeated label=provider or provider specs."""
+    specs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for value in values or []:
+        label, provider = _split_named_path(value)
+        effective_label = label or provider
+        if effective_label in seen:
+            raise ValueError(f"duplicate formula candidate provider label: {effective_label}")
+        seen.add(effective_label)
+        specs.append((effective_label, provider))
+    return specs
+
+
 def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
     """Keep CLI JSON stdout parseable when dependencies print progress text."""
     if not json_output:
@@ -1555,7 +1569,7 @@ def _formula_estimate_config_from_args(args):
     """Resolve formula-estimate config while allowing read-only SimpleTex estimates."""
     config = _with_formula_candidate_provider_options(
         _with_formula_pdf_number_options(
-            resolve_runtime_config(args.config),
+            resolve_runtime_config(getattr(args, "config", None)),
             cache_pdf_number_enrichment=getattr(args, "cache_pdf_number_enrichment", False),
             append_missing_pdf_number_candidates=getattr(args, "append_missing_pdf_number_candidates", False),
         ),
@@ -1667,13 +1681,33 @@ def cmd_compare_formula_parsers(args):
     from .feature_extraction.formula_external_parser_comparison import (
         build_formula_external_parser_comparison,
     )
+    from .indexer import ConfigDriftError, Indexer
+    from .vector_store import IndexUnavailableError
 
     try:
-        reports = _read_named_formula_estimate_reports(args.estimate)
+        reports = _read_named_formula_estimate_reports(getattr(args, "estimate", None))
+        for label, provider in _parse_formula_candidate_provider_specs(getattr(args, "candidate_provider", None)):
+            if label in reports:
+                raise ValueError(f"duplicate formula parser label: {label}")
+            estimate_args = argparse.Namespace(**vars(args))
+            estimate_args.candidate_provider = provider
+            estimate_args.candidate_cache_dirs = getattr(args, "candidate_cache_dirs", None)
+            config = _formula_estimate_config_from_args(estimate_args)
+            if config is None:
+                return 1
+            estimate_kwargs, _preview_limit = _formula_estimate_kwargs_from_args(estimate_args)
+            reports[label] = _call_with_json_stdout_guard(
+                lambda config=config, estimate_kwargs=estimate_kwargs: (
+                    Indexer.for_formula_estimate(config).estimate_formula_backfill(**estimate_kwargs)
+                ),
+                json_output=args.json,
+            )
         if len(reports) < 2:
-            raise ValueError("compare-formula-parsers requires at least two --estimate inputs")
+            raise ValueError(
+                "compare-formula-parsers requires at least two --estimate or --candidate-provider inputs"
+            )
         comparison = build_formula_external_parser_comparison(reports)
-    except (OSError, json.JSONDecodeError, ValueError) as e:
+    except (ConfigDriftError, IndexUnavailableError, OSError, json.JSONDecodeError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     if args.json:
@@ -1688,7 +1722,12 @@ def cmd_compare_formula_parsers(args):
 
 
 def _validate_formula_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.command not in {"index-formulas", "estimate-formula-backfill", "audit-formula-candidates"}:
+    if args.command not in {
+        "index-formulas",
+        "estimate-formula-backfill",
+        "audit-formula-candidates",
+        "compare-formula-parsers",
+    }:
         return
     preview_chars = getattr(args, "preview_chars", 0)
     if preview_chars is not None and preview_chars < 0:
@@ -3169,14 +3208,119 @@ def main(argv: list[str] | None = None) -> int:
         "compare-formula-parsers",
         help="Compare multiple read-only formula parser estimate/audit JSON reports",
     )
+    formula_compare_scope = sub_formula_compare.add_mutually_exclusive_group()
+    formula_compare_scope.add_argument("--item-key", type=str, default=None, help="Compare one Zotero item key")
+    formula_compare_scope.add_argument(
+        "--item-keys",
+        nargs="+",
+        default=None,
+        help="Compare a space-separated list of Zotero item keys",
+    )
+    sub_formula_compare.add_argument("--limit", type=int, default=None, help="Max already-indexed papers to scan")
+    sub_formula_compare.add_argument(
+        "--sample-size",
+        type=int,
+        default=None,
+        help="Randomly sample N matched already-indexed papers for read-only provider comparison",
+    )
+    sub_formula_compare.add_argument(
+        "--sample-seed",
+        type=int,
+        default=0,
+        help="Seed for --sample-size so provider comparison batches are reproducible",
+    )
+    sub_formula_compare.add_argument(
+        "--exclude-item-keys",
+        nargs="+",
+        default=None,
+        help="Exclude these Zotero item keys from --sample-size provider comparison",
+    )
+    sub_formula_compare.add_argument(
+        "--exclude-item-keys-file",
+        type=str,
+        default=None,
+        help="Read excluded Zotero item keys from a text or JSON file for provider comparison",
+    )
     sub_formula_compare.add_argument(
         "--estimate",
         action="append",
-        required=True,
+        default=None,
         help=(
             "Parser estimate JSON as label=path or path; repeat for MinerU, PDF-Extract-Kit, "
             "Docling, Marker, or other read-only parser reports"
         ),
+    )
+    sub_formula_compare.add_argument(
+        "--candidate-provider",
+        action="append",
+        default=None,
+        help=(
+            "Run a read-only estimate for label=provider or provider; repeat for text_layer, "
+            "mineru_json, pdf_extract_kit_json, or other candidate providers"
+        ),
+    )
+    sub_formula_compare.add_argument(
+        "--candidate-cache-dirs",
+        type=str,
+        default=None,
+        help="Temporarily override formula_candidate_cache_dirs for provider estimates",
+    )
+    sub_formula_compare.add_argument(
+        "--resume-after",
+        type=str,
+        default=None,
+        help="Resume provider estimates after this Zotero item key",
+    )
+    sub_formula_compare.add_argument(
+        "--daily-call-budget",
+        type=int,
+        default=None,
+        help="Daily call budget to use for estimated run count",
+    )
+    sub_formula_compare.add_argument(
+        "--preview-candidates",
+        type=int,
+        default=-1,
+        help="Include up to N candidate previews per parser; default -1 includes all candidates",
+    )
+    sub_formula_compare.add_argument(
+        "--preview-chars",
+        type=int,
+        default=160,
+        help="Max characters per raw_text/latex preview; 0 keeps the full text",
+    )
+    sub_formula_compare.add_argument(
+        "--pdf-fallback-max-pages",
+        type=int,
+        default=None,
+        help="Max PDF pages to scan for fallback equation-number candidates",
+    )
+    sub_formula_compare.add_argument(
+        "--cache-pdf-number-enrichment",
+        action="store_true",
+        help="Explicitly open PDFs to enrich equation numbers for cached LaTeX during provider estimates",
+    )
+    sub_formula_compare.add_argument(
+        "--append-missing-pdf-number-candidates",
+        action="store_true",
+        help="Add missing numbered PDF formula candidates for reviewed gaps during provider estimates",
+    )
+    sub_formula_compare.add_argument(
+        "--include-high-density",
+        action="store_true",
+        help="Use full candidate scanning for high-density formula documents",
+    )
+    sub_formula_compare.add_argument(
+        "--page-min",
+        type=int,
+        default=None,
+        help="Only compare formula candidates on or after this 1-based PDF page; single-item comparisons only",
+    )
+    sub_formula_compare.add_argument(
+        "--page-max",
+        type=int,
+        default=None,
+        help="Only compare formula candidates on or before this 1-based PDF page; single-item comparisons only",
     )
     sub_formula_compare.add_argument(
         "--fail-on-conflicts",
@@ -3189,6 +3333,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Return exit code 8 when any paper is routed to manual review",
     )
     sub_formula_compare.add_argument("--json", action="store_true", help="Output the full comparison as JSON")
+    sub_formula_compare.add_argument("--config", type=str, default=None, help="Config file path")
     sub_formula_compare.set_defaults(func=cmd_compare_formula_parsers)
 
     # status

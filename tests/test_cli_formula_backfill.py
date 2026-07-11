@@ -2541,3 +2541,84 @@ def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert rc == 7
     assert payload["conflict_cluster_count"] == 1
+
+
+def test_compare_formula_parsers_cli_can_run_candidate_provider_estimates(capsys):
+    from zotpilot.cli import main
+
+    configs = []
+    indexers = []
+
+    def make_config():
+        config = MagicMock()
+        config.validate.return_value = []
+        config.formula_candidate_provider = "auto"
+        config.formula_candidate_cache_dirs = ""
+        configs.append(config)
+        return config
+
+    def estimate_factory(config):
+        indexer = MagicMock()
+        provider = config.formula_candidate_provider
+        source = (
+            "mineru_content_list"
+            if provider == "mineru_json"
+            else "pdf_extract_kit_formula_recognition"
+        )
+        indexer.estimate_formula_backfill.return_value = {
+            "provider": "local",
+            "candidate_provider": provider,
+            "candidate_count": 1,
+            "results": [
+                {
+                    "item_key": "DOC1",
+                    "title": "Paper",
+                    "candidate_count": 1,
+                    "candidate_audit": {"source_counts": {source: 1}},
+                    "candidate_preview": [
+                        {
+                            "candidate_index": 0,
+                            "page_num": 1,
+                            "source": source,
+                            "equation_number": "(1)",
+                            "bbox": [10, 20, 300, 48],
+                            "latex_preview": r"E = mc^2",
+                            "has_latex": True,
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        }
+        indexers.append(indexer)
+        return indexer
+
+    with (
+        patch("zotpilot.cli.resolve_runtime_config", side_effect=[make_config(), make_config()]),
+        patch("zotpilot.indexer.Indexer.for_formula_estimate", side_effect=estimate_factory),
+    ):
+        rc = main(
+            [
+                "compare-formula-parsers",
+                "--candidate-provider",
+                "mineru=mineru_json",
+                "--candidate-provider",
+                "pdfkit=pdf_extract_kit_json",
+                "--candidate-cache-dirs",
+                "F:/parser-cache",
+                "--item-key",
+                "DOC1",
+                "--json",
+            ]
+        )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["parser_labels"] == ["mineru", "pdfkit"]
+    assert payload["multi_provider_cluster_count"] == 1
+    assert configs[0].formula_candidate_provider == "mineru_json"
+    assert configs[1].formula_candidate_provider == "pdf_extract_kit_json"
+    assert configs[0].formula_candidate_cache_dirs == "F:/parser-cache"
+    assert configs[1].formula_candidate_cache_dirs == "F:/parser-cache"
+    assert indexers[0].estimate_formula_backfill.call_args.kwargs["candidate_preview_limit"] == -1
+    assert indexers[1].estimate_formula_backfill.call_args.kwargs["candidate_preview_limit"] == -1
