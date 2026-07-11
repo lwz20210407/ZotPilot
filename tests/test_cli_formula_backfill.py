@@ -2318,3 +2318,164 @@ def test_audit_formula_candidates_parser_rejects_page_window_without_single_item
             main(["audit-formula-candidates", "--item-keys", "DOC1", "DOC2", "--page-min", "4"])
 
     assert exc.value.code == 2
+
+
+def test_compare_formula_parsers_cli_outputs_json_without_loading_config(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    mineru_path = tmp_path / "mineru.json"
+    pdf_extract_kit_path = tmp_path / "pdf_extract_kit.json"
+    mineru_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 1,
+                "results": [
+                    {
+                        "item_key": "DOC1",
+                        "title": "Paper",
+                        "candidate_count": 1,
+                        "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "mineru_content_list",
+                                "equation_number": "(1)",
+                                "bbox": [10, 20, 300, 48],
+                                "latex_preview": r"E = mc^2",
+                                "has_latex": True,
+                                "needs_ocr": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pdf_extract_kit_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 1,
+                "results": [
+                    {
+                        "item_key": "DOC1",
+                        "title": "Paper",
+                        "candidate_count": 1,
+                        "candidate_audit": {"source_counts": {"pdf_extract_kit_formula_recognition": 1}},
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "pdf_extract_kit_formula_recognition",
+                                "equation_number": "(1)",
+                                "bbox": [11, 20, 299, 49],
+                                "latex_preview": r"E = mc^2",
+                                "has_latex": True,
+                                "needs_ocr": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("zotpilot.cli.resolve_runtime_config", side_effect=AssertionError("config should not load")):
+        rc = main(
+            [
+                "compare-formula-parsers",
+                "--estimate",
+                f"mineru={mineru_path}",
+                "--estimate",
+                f"pdf_extract_kit={pdf_extract_kit_path}",
+                "--json",
+            ]
+        )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["mode"] == "read_only_external_parser_comparison"
+    assert payload["parser_labels"] == ["mineru", "pdf_extract_kit"]
+    assert payload["multi_provider_cluster_count"] == 1
+    assert payload["rows"][0]["write_recommendation"] == "candidate_supported_by_cross_parser_review"
+
+
+def test_compare_formula_parsers_cli_can_fail_on_conflicts(tmp_path, capsys):
+    from zotpilot.cli import main
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    base_row = {
+        "item_key": "DOC1",
+        "title": "Paper",
+        "candidate_count": 1,
+        "candidate_audit": {"source_counts": {"mineru_content_list": 1}},
+    }
+    first_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 1,
+                "results": [
+                    {
+                        **base_row,
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "mineru_content_list",
+                                "equation_number": "(1)",
+                                "bbox": [10, 20, 300, 48],
+                                "latex_preview": r"E = mc^2",
+                                "has_latex": True,
+                                "needs_ocr": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    second_path.write_text(
+        json.dumps(
+            {
+                "candidate_count": 1,
+                "results": [
+                    {
+                        **base_row,
+                        "candidate_preview": [
+                            {
+                                "candidate_index": 0,
+                                "page_num": 1,
+                                "source": "pdf_extract_kit_formula_detection",
+                                "equation_number": "(2)",
+                                "bbox": [11, 20, 299, 49],
+                                "raw_text_preview": r"E = mc^2",
+                                "has_latex": False,
+                                "needs_ocr": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "compare-formula-parsers",
+            "--estimate",
+            f"first={first_path}",
+            "--estimate",
+            f"second={second_path}",
+            "--fail-on-conflicts",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 7
+    assert payload["conflict_cluster_count"] == 1

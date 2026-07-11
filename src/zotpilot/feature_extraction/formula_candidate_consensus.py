@@ -57,7 +57,7 @@ def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -
         "cluster_count": len(cluster_rows),
         "multi_provider_cluster_count": sum(
             1 for cluster in cluster_rows
-            if int(cluster["provider_group_count"]) >= 2
+            if int(cluster["provider_group_count"]) >= 2 or int(cluster["parser_label_count"]) >= 2
         ),
         "single_provider_cluster_count": sum(
             1 for cluster in cluster_rows
@@ -106,6 +106,7 @@ def _candidate_row(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "bbox": _bbox_value(candidate.get("bbox")),
         "source": source,
         "source_group": source_group(source),
+        "parser_label": str(candidate.get("parser_label", "") or ""),
         "equation_number": equation_number,
         "normalized_equation_number": normalize_equation_number(equation_number),
         "latex_signature": _formula_signature(latex or raw_text),
@@ -147,6 +148,11 @@ def _same_formula_candidate(left: Mapping[str, Any], right: Mapping[str, Any]) -
 def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[str, Any]:
     source_counts = Counter(str(candidate["source"]) for candidate in candidates)
     group_counts = Counter(str(candidate["source_group"]) for candidate in candidates)
+    parser_label_counts = Counter(
+        str(candidate["parser_label"])
+        for candidate in candidates
+        if candidate["parser_label"]
+    )
     page_nums = sorted({int(candidate["page_num"]) for candidate in candidates if int(candidate["page_num"]) > 0})
     equation_numbers = [
         str(candidate["equation_number"])
@@ -179,8 +185,10 @@ def _summarize_cluster(index: int, candidates: list[Mapping[str, Any]]) -> dict[
         "candidate_count": len(candidates),
         "source_counts": dict(sorted(source_counts.items())),
         "source_group_counts": dict(sorted(group_counts.items())),
+        "parser_label_counts": dict(sorted(parser_label_counts.items())),
         "source_group_count": len([count for count in group_counts.values() if count]),
         "provider_group_count": len([count for count in group_counts.values() if count]),
+        "parser_label_count": len([count for count in parser_label_counts.values() if count]),
         "structured_provider_group_count": sum(
             1 for group, count in group_counts.items()
             if count and group in STRUCTURED_SOURCE_GROUPS
@@ -205,7 +213,12 @@ def _cluster_review_flags(
     signatures: set[str],
 ) -> list[str]:
     flags: list[str] = []
-    if len([count for count in group_counts.values() if count]) >= 2:
+    parser_label_count = len({
+        str(candidate.get("parser_label", "") or "")
+        for candidate in candidates
+        if str(candidate.get("parser_label", "") or "")
+    })
+    if len([count for count in group_counts.values() if count]) >= 2 or parser_label_count >= 2:
         flags.append("multi_provider_agreement")
     else:
         flags.append("single_provider_only")

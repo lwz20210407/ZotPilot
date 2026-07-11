@@ -170,6 +170,37 @@ def _read_formula_auto_candidate_item_keys(path: str | None) -> list[str]:
     return item_keys
 
 
+def _read_named_formula_estimate_reports(values: list[str] | None) -> dict[str, dict]:
+    """Read named formula estimate/audit JSON files for parser comparison."""
+    reports: dict[str, dict] = {}
+    for value in values or []:
+        label, path_text = _split_named_path(value)
+        path = Path(path_text).expanduser()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"formula parser estimate {path} must contain a JSON object")
+        effective_label = label or path.stem
+        if effective_label in reports:
+            raise ValueError(f"duplicate formula parser estimate label: {effective_label}")
+        reports[effective_label] = payload
+    return reports
+
+
+def _split_named_path(value: str) -> tuple[str, str]:
+    """Split label=path without treating a Windows drive prefix as a label."""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("empty formula parser estimate path")
+    if "=" not in text:
+        return "", text
+    label, path = text.split("=", 1)
+    label = label.strip()
+    path = path.strip()
+    if not label or not path:
+        raise ValueError(f"invalid formula parser estimate mapping: {value}")
+    return label, path
+
+
 def _call_with_json_stdout_guard(callable_obj, *, json_output: bool):
     """Keep CLI JSON stdout parseable when dependencies print progress text."""
     if not json_output:
@@ -1179,6 +1210,38 @@ def _print_formula_candidate_audit_report(report: dict, *, preview_limit: int = 
         _print_formula_backfill_estimate(estimate, preview_limit=preview_limit)
 
 
+def _print_formula_parser_comparison(report: dict) -> None:
+    print("Formula external parser comparison:")
+    print(f"  Parsers:                  {report.get('parser_count', 0)}")
+    print(f"  Parser labels:            {', '.join(report.get('parser_labels', []))}")
+    print(f"  Papers:                   {report.get('paper_count', 0)}")
+    print(f"  Previewed papers:         {report.get('previewed_paper_count', 0)}")
+    print(f"  Formula clusters:         {report.get('consensus_cluster_count', 0)}")
+    print(f"  Multi-provider clusters:  {report.get('multi_provider_cluster_count', 0)}")
+    print(f"  Conflict clusters:        {report.get('conflict_cluster_count', 0)}")
+    print(f"  Manual review papers:     {report.get('manual_review_paper_count', 0)}")
+    candidate_counts = report.get("candidate_count_by_parser") or {}
+    if candidate_counts:
+        print("\nCandidate counts:")
+        for label, count in sorted(candidate_counts.items()):
+            print(f"  - {label}: {count}")
+    rows = report.get("rows") or []
+    if rows:
+        print("\nRows:")
+        for row in rows[:10]:
+            flags = row.get("comparison_flags") or []
+            print(
+                f"  - {row.get('item_key')}: parsers={row.get('parser_count')} "
+                f"candidates={row.get('candidate_count_min')}-{row.get('candidate_count_max')} "
+                f"clusters={row.get('candidate_consensus', {}).get('cluster_count', 0)} "
+                f"recommendation={row.get('write_recommendation')}"
+            )
+            if flags:
+                print(f"    flags: {', '.join(str(flag) for flag in flags[:8])}")
+        if len(rows) > 10:
+            print("  - ... use --json to inspect all rows")
+
+
 def _unmatched_requested_item_count(result: dict[str, object]) -> int:
     count = result.get("unmatched_requested_item_key_count")
     if count is not None:
@@ -1567,6 +1630,31 @@ def cmd_audit_formula_candidates(args):
 
     _print_formula_candidate_audit_report(report, preview_limit=preview_limit)
     return _formula_estimate_exit_code(args, estimate)
+
+
+def cmd_compare_formula_parsers(args):
+    """Compare multiple read-only formula parser estimate reports."""
+    from .feature_extraction.formula_external_parser_comparison import (
+        build_formula_external_parser_comparison,
+    )
+
+    try:
+        reports = _read_named_formula_estimate_reports(args.estimate)
+        if len(reports) < 2:
+            raise ValueError("compare-formula-parsers requires at least two --estimate inputs")
+        comparison = build_formula_external_parser_comparison(reports)
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if args.json:
+        _print_json(comparison, ensure_ascii=False, indent=2)
+    else:
+        _print_formula_parser_comparison(comparison)
+    if getattr(args, "fail_on_conflicts", False) and comparison.get("conflict_cluster_count"):
+        return 7
+    if getattr(args, "fail_on_manual_review", False) and comparison.get("manual_review_paper_count"):
+        return 8
+    return 0
 
 
 def _validate_formula_cli_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -3021,6 +3109,33 @@ def main(argv: list[str] | None = None) -> int:
     sub_formula_audit.add_argument("--json", action="store_true", help="Output the full audit as JSON")
     sub_formula_audit.add_argument("--config", type=str, default=None, help="Config file path")
     sub_formula_audit.set_defaults(func=cmd_audit_formula_candidates)
+
+    # compare-formula-parsers
+    sub_formula_compare = subparsers.add_parser(
+        "compare-formula-parsers",
+        help="Compare multiple read-only formula parser estimate/audit JSON reports",
+    )
+    sub_formula_compare.add_argument(
+        "--estimate",
+        action="append",
+        required=True,
+        help=(
+            "Parser estimate JSON as label=path or path; repeat for MinerU, PDF-Extract-Kit, "
+            "Docling, Marker, or other read-only parser reports"
+        ),
+    )
+    sub_formula_compare.add_argument(
+        "--fail-on-conflicts",
+        action="store_true",
+        help="Return exit code 7 when cross-parser candidate conflicts are found",
+    )
+    sub_formula_compare.add_argument(
+        "--fail-on-manual-review",
+        action="store_true",
+        help="Return exit code 8 when any paper is routed to manual review",
+    )
+    sub_formula_compare.add_argument("--json", action="store_true", help="Output the full comparison as JSON")
+    sub_formula_compare.set_defaults(func=cmd_compare_formula_parsers)
 
     # status
     sub_status = subparsers.add_parser("status", help="Show config and index stats")
