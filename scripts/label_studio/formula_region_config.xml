@@ -1,0 +1,7 @@
+<View>
+  <Image name="image" value="$image" />
+  <RectangleLabels name="formula_region" toName="image">
+    <Label value="formula" background="#1F77B4" />
+    <Label value="formula_number" background="#D62728" />
+  </RectangleLabels>
+</View>
