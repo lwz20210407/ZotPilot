@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pymupdf
 
 from ..formula_ocr import FormulaCandidate
+from .formula_layout_filter import PageColumn
 from .pp_doclayout_candidate_cache import (
     PpDocLayoutFormulaNumberRegion,
     load_pp_doclayout_formula_number_regions,
@@ -26,9 +27,9 @@ _NUMBER_LABEL_RE = re.compile(
 _MAX_HORIZONTAL_GAP_FRACTION = 0.8
 # Detector boxes may include the formula's trailing whitespace, leaving only a
 # few PDF points before a genuine right-edge number.  The maximum-gap and
-# one-token/one-block constraints prevent cross-column matches; this only
-# rejects overlapping boxes.
-_MIN_HORIZONTAL_GAP = 1.0
+# one-token/one-block constraints prevent cross-column matches; tolerate up to
+# two points of detector-box overlap at the formula tail.
+_MIN_HORIZONTAL_GAP = -2.0
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def bind_pp_doclayout_equation_numbers(
     cache_paths: Iterable[Path | str],
     *,
     min_confidence: float = 0.6,
+    columns_by_page: Mapping[int, tuple[PageColumn, ...]] | None = None,
 ) -> EquationNumberBindingResult:
     """Bind only visual number boxes that contain a standalone equation label.
 
@@ -63,7 +65,7 @@ def bind_pp_doclayout_equation_numbers(
         min_confidence=min_confidence,
     )
     tokens = _read_number_tokens(pdf_path, number_regions)
-    matches = _binding_matches(original, tokens, pdf_path)
+    matches = _binding_matches(original, tokens, pdf_path, columns_by_page=columns_by_page or {})
     bound_candidates = list(original)
     used_candidates: set[int] = set()
     used_tokens: set[int] = set()
@@ -161,6 +163,8 @@ def _binding_matches(
     candidates: list[FormulaCandidate],
     tokens: list[_NumberToken],
     pdf_path: Path | str,
+    *,
+    columns_by_page: Mapping[int, tuple[PageColumn, ...]],
 ) -> list[tuple[float, int, int]]:
     try:
         document = pymupdf.open(str(pdf_path))
@@ -174,16 +178,44 @@ def _binding_matches(
     finally:
         document.close()
     matches: list[tuple[float, int, int]] = []
+    strict_match_tokens: set[int] = set()
     for candidate_index, candidate in enumerate(candidates):
         if candidate.source != "pp_doclayout_region" or candidate.equation_number:
             continue
         for token_index, token in enumerate(tokens):
-            if _can_bind(candidate, token, page_widths.get(candidate.page_num, 0.0)):
+            if _can_bind(
+                candidate,
+                token,
+                page_widths.get(candidate.page_num, 0.0),
+                columns_by_page.get(candidate.page_num, ()),
+            ):
                 matches.append((_binding_score(candidate, token), candidate_index, token_index))
+                strict_match_tokens.add(token_index)
+    # A short full-width equation can start in the left margin even on a page
+    # whose body is otherwise two-column.  Permit that outer-margin fallback
+    # only when no same-column candidate exists for that number token; this
+    # prevents a left-column formula from stealing a real right-column label.
+    for candidate_index, candidate in enumerate(candidates):
+        if candidate.source != "pp_doclayout_region" or candidate.equation_number:
+            continue
+        for token_index, token in enumerate(tokens):
+            if token_index in strict_match_tokens:
+                continue
+            page_width = page_widths.get(candidate.page_num, 0.0)
+            if (
+                _can_bind(candidate, token, page_width, ())
+                and _is_outer_margin_fallback(candidate.bbox, token.bbox, page_width)
+            ):
+                matches.append((_binding_score(candidate, token) + 25.0, candidate_index, token_index))
     return sorted(matches)
 
 
-def _can_bind(candidate: FormulaCandidate, token: _NumberToken, page_width: float) -> bool:
+def _can_bind(
+    candidate: FormulaCandidate,
+    token: _NumberToken,
+    page_width: float,
+    columns: tuple[PageColumn, ...],
+) -> bool:
     if candidate.page_num != token.page_num or page_width <= 0:
         return False
     candidate_x0, candidate_y0, candidate_x1, candidate_y1 = candidate.bbox
@@ -197,7 +229,37 @@ def _can_bind(candidate: FormulaCandidate, token: _NumberToken, page_width: floa
     vertical_limit = max(candidate_height, token_height) * 1.25
     if abs(_center_y(candidate.bbox) - _center_y(token.bbox)) > vertical_limit:
         return False
+    if columns and not _same_column(candidate.bbox, token.bbox, columns):
+        return False
     return token_x1 > token_x0 and candidate_x1 > candidate_x0
+
+
+def _same_column(
+    candidate: tuple[float, float, float, float],
+    token: tuple[float, float, float, float],
+    columns: tuple[PageColumn, ...],
+) -> bool:
+    if len(columns) < 2:
+        return True
+    if any(candidate[0] < column.x0 < candidate[2] for column in columns[1:]):
+        return True
+    candidate_center = (candidate[0] + candidate[2]) / 2
+    candidate_column = next((column for column in columns if column.x0 <= candidate_center <= column.x1), None)
+    if candidate_column is None:
+        return False
+    # A detector's number box can straddle the gutter even though it is the
+    # right-edge label of the left column.  Use the label's left edge and a
+    # small gutter tolerance instead of its center for that boundary case.
+    gutter_tolerance = max(18.0, (candidate_column.x1 - candidate_column.x0) * 0.10)
+    return candidate_column.x0 - gutter_tolerance <= token[0] <= candidate_column.x1 + gutter_tolerance
+
+
+def _is_outer_margin_fallback(
+    candidate: tuple[float, float, float, float],
+    token: tuple[float, float, float, float],
+    page_width: float,
+) -> bool:
+    return page_width > 0 and candidate[0] <= page_width * 0.18 and token[0] >= page_width * 0.8
 
 
 def _binding_score(candidate: FormulaCandidate, token: _NumberToken) -> float:

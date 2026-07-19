@@ -101,6 +101,27 @@ def test_visual_number_binding_accepts_a_close_non_overlapping_tail_number(tmp_p
     assert result.bound_numbers == ("(1)",)
 
 
+def test_visual_number_binding_tolerates_two_point_detector_box_overlap(tmp_path):
+    labels = ["(1)"]
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "pp_doclayout_layout.json"
+    _write_numbered_pdf(pdf_path, labels)
+    _write_cache(cache_path, pdf_path, labels)
+    candidates = [
+        FormulaCandidate(
+            page_num=1,
+            bbox=(50, 105, 491, 135),
+            raw_text="",
+            confidence=0.95,
+            source="pp_doclayout_region",
+        )
+    ]
+
+    result = bind_pp_doclayout_equation_numbers(pdf_path, candidates, [cache_path])
+
+    assert result.bound_numbers == ("(1)",)
+
+
 def test_visual_number_binding_accepts_a_short_single_column_formula_with_right_edge_number(tmp_path):
     labels = ["(1)"]
     pdf_path = tmp_path / "paper.pdf"

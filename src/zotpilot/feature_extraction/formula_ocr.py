@@ -297,6 +297,7 @@ class FormulaCandidate:
     latex: str = ""
     source_artifact_hash: str = ""
     quality_flags: tuple[str, ...] = ()
+    layout_kind: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -772,6 +773,7 @@ class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
         pdf_fallback_max_pages: int | None = None,
     ) -> list[FormulaCandidate]:
         del pdf_fallback_max_pages
+        detector_floor = min(min_confidence, 0.5)
         paths = self._candidate_cache_paths(
             pdf_path,
             item_key=item_key,
@@ -791,9 +793,28 @@ class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
             for region in load_pp_doclayout_formula_regions(
                 pdf_path,
                 paths,
-                min_confidence=min_confidence,
+                # A true number box is an independent display signal.  Keep a
+                # small low-confidence band so the layout stage can recover a
+                # detector box immediately adjacent to that number, while
+                # retaining the configured threshold for all other regions.
+                min_confidence=detector_floor,
             )
         ]
+        from .vision_layout.formula_layout_filter import classify_visual_formula_candidates
+        from .vision_layout.pp_doclayout_candidate_cache import load_pp_doclayout_formula_number_regions
+
+        layout = classify_visual_formula_candidates(
+            pdf_path,
+            candidates,
+            load_pp_doclayout_formula_number_regions(
+                pdf_path,
+                paths,
+                min_confidence=min_confidence,
+            ),
+            min_confidence=min_confidence,
+            number_assisted_floor=detector_floor,
+        )
+        candidates = list(layout.candidates)
         candidates = _limit_ocr_needed_candidates(
             candidates,
             max_formulas_per_page=max_formulas_per_page,
@@ -811,6 +832,7 @@ class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
             candidates,
             paths,
             min_confidence=min_confidence,
+            columns_by_page=layout.columns_by_page,
         )
         return _sort_formula_candidates_for_review(list(binding.candidates))
 
