@@ -1,3 +1,4 @@
+import hashlib
 import json
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from zotpilot.feature_extraction.formula_ocr import (
     PDF_TEXT_FALLBACK_MAX_PAGES,
     AutoFormulaCandidateProvider,
     FormulaCandidate,
+    PpDocLayoutFormulaCandidateProvider,
     SimpleTexFormulaOCRProvider,
     TextLayerFormulaCandidateProvider,
     _assign_equation_number_statuses_from_pdf,
@@ -130,6 +132,74 @@ def test_cached_formula_latex_normalizes_spaced_numeric_constants(tmp_path):
 
     assert len(formulas) == 1
     assert formulas[0].latex == r"V _ { b l } = 622 \cdot ( H / D ) ^ { 0.673 } - 33"
+
+
+def test_pp_doclayout_candidate_provider_reads_only_bound_visual_cache(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"pdf contents used for cache binding")
+    cache_path = tmp_path / "pp_doclayout_layout.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generator": "pp_doclayout",
+                "source_pdf_sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [612, 792],
+                        "coordinate_space": "pdf",
+                        "regions": [
+                            {"cls": "formula", "bbox_pt": [50, 100, 300, 140], "conf": 0.91},
+                            {"cls": "formula_number", "bbox_pt": [500, 100, 530, 140], "conf": 0.91},
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = PpDocLayoutFormulaCandidateProvider().extract_candidates(
+        pdf_path,
+        cache_paths=(cache_path,),
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.source == "pp_doclayout_region"
+    assert candidate.bbox == (50.0, 100.0, 300.0, 140.0)
+    assert candidate.equation_number == ""
+    assert candidate.equation_number_status == "unbound"
+    assert candidate.source_artifact_hash
+
+
+def test_candidate_provider_factory_creates_pp_doclayout_reader(tmp_path):
+    provider = create_formula_candidate_provider(
+        "pp_doclayout",
+        config=SimpleNamespace(formula_candidate_cache_dirs=str(tmp_path)),
+    )
+
+    assert isinstance(provider, PpDocLayoutFormulaCandidateProvider)
+
+
+def test_text_layer_provider_records_the_pdf_as_its_source_artifact(tmp_path):
+    pdf_path = tmp_path / "math.pdf"
+    pdf_path.write_bytes(b"a source document")
+    expected = FormulaCandidate(
+        page_num=1,
+        bbox=(50, 100, 300, 140),
+        raw_text="E = mc2",
+        confidence=0.9,
+    )
+    with patch(
+        "zotpilot.feature_extraction.formula_ocr._extract_text_layer_formula_candidates",
+        return_value=[expected],
+    ):
+        candidates = TextLayerFormulaCandidateProvider().extract_candidates(pdf_path)
+
+    assert candidates
+    assert candidates[0].source_artifact_hash == hashlib.sha256(pdf_path.read_bytes()).hexdigest()
 
 
 def test_rapid_latex_ocr_tuple_elapsed_time_is_not_confidence():

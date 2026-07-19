@@ -27,6 +27,7 @@ import pymupdf
 
 from .. import providers
 from ..models import ExtractedFormula
+from .vision_layout.pp_doclayout_candidate_cache import load_pp_doclayout_formula_regions
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +295,7 @@ class FormulaCandidate:
     source: str = "text_layer"
     bbox_coordinate_space: str = "pdf"
     latex: str = ""
+    source_artifact_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -371,13 +373,18 @@ class TextLayerFormulaCandidateProvider:
         min_confidence: float = 0.6,
         pdf_fallback_max_pages: int | None = None,
     ) -> list[FormulaCandidate]:
-        return _extract_text_layer_formula_candidates(
+        candidates = _extract_text_layer_formula_candidates(
             pdf_path,
             max_formulas_per_doc=max_formulas_per_doc,
             max_formulas_per_page=max_formulas_per_page,
             max_candidates_per_doc=max_candidates_per_doc,
             min_confidence=min_confidence,
         )
+        source_artifact_hash = _source_artifact_hash(Path(pdf_path))
+        return [
+            replace(candidate, source_artifact_hash=source_artifact_hash)
+            for candidate in candidates
+        ]
 
 
 class MinerUCacheFormulaCandidateProvider:
@@ -546,10 +553,10 @@ class MinerUCacheFormulaCandidateProvider:
         item_key: str | None,
         explicit_cache_paths: tuple[Path | str, ...] | None = None,
     ) -> list[Path]:
-        explicit_paths = [
-            path for path in _explicit_formula_cache_paths(explicit_cache_paths)
-            if self._is_cache_path(path)
-        ]
+        explicit_paths = _explicit_formula_cache_paths(
+            explicit_cache_paths,
+            cache_path_filter=self._is_cache_path,
+        )
         if explicit_paths:
             return explicit_paths
         pdf = Path(pdf_path)
@@ -731,6 +738,72 @@ class PdfExtractKitJsonFormulaCandidateProvider(MinerUCacheFormulaCandidateProvi
 
     def _is_cache_path(self, path: Path) -> bool:
         return _is_pdf_extract_kit_cache_file(path)
+
+
+class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
+    """Read independent PP-DocLayout formula-region caches without running PaddleOCR.
+
+    This is deliberately detection-only.  ``formula_number`` regions stay in
+    the cache for the later geometry-binding stage instead of being guessed
+    from text-layer regular expressions here.
+    """
+
+    name = "pp_doclayout"
+
+    def _is_cache_path(self, path: Path) -> bool:
+        name = path.name.lower()
+        return (
+            name == "pp_doclayout_layout.json"
+            or "pp_doclayout" in name
+            or "pp-doclayout" in name
+        ) and path.suffix.lower() == ".json"
+
+    def extract_candidates(
+        self,
+        pdf_path: Path | str,
+        *,
+        item_key: str | None = None,
+        cache_paths: tuple[Path | str, ...] | None = None,
+        max_formulas_per_doc: int = 40,
+        max_formulas_per_page: int = 6,
+        max_candidates_per_doc: int = 0,
+        min_confidence: float = 0.6,
+        pdf_fallback_max_pages: int | None = None,
+    ) -> list[FormulaCandidate]:
+        del pdf_fallback_max_pages
+        paths = self._candidate_cache_paths(
+            pdf_path,
+            item_key=item_key,
+            explicit_cache_paths=cache_paths,
+        )
+        candidates = [
+            FormulaCandidate(
+                page_num=region.page_num,
+                bbox=region.bbox,
+                raw_text="",
+                confidence=region.confidence,
+                source="pp_doclayout_region",
+                bbox_coordinate_space="pdf",
+                equation_number_status="unbound",
+                source_artifact_hash=region.source_artifact_hash,
+            )
+            for region in load_pp_doclayout_formula_regions(
+                pdf_path,
+                paths,
+                min_confidence=min_confidence,
+            )
+        ]
+        candidates = _limit_ocr_needed_candidates(
+            candidates,
+            max_formulas_per_page=max_formulas_per_page,
+            max_formulas_per_doc=_ocr_doc_limit_for_candidate_discovery(
+                max_formulas_per_doc=max_formulas_per_doc,
+                max_candidates_per_doc=max_candidates_per_doc,
+            ),
+        )
+        if max_candidates_per_doc > 0:
+            candidates = candidates[:max_candidates_per_doc]
+        return _sort_formula_candidates_for_review(candidates)
 
 
 def _structured_candidates_complete_for_auto(candidates: list[FormulaCandidate]) -> bool:
@@ -917,13 +990,15 @@ FORMULA_CANDIDATE_PROVIDERS: dict[
     | type[AutoFormulaCandidateProvider]
     | type[MinerUCacheFormulaCandidateProvider]
     | type[MinerUJsonFormulaCandidateProvider]
-    | type[PdfExtractKitJsonFormulaCandidateProvider],
+    | type[PdfExtractKitJsonFormulaCandidateProvider]
+    | type[PpDocLayoutFormulaCandidateProvider],
 ] = {
     "auto": AutoFormulaCandidateProvider,
     "text_layer": TextLayerFormulaCandidateProvider,
     "mineru_cache": MinerUCacheFormulaCandidateProvider,
     "mineru_json": MinerUJsonFormulaCandidateProvider,
     "pdf_extract_kit_json": PdfExtractKitJsonFormulaCandidateProvider,
+    "pp_doclayout": PpDocLayoutFormulaCandidateProvider,
 }
 
 
@@ -1481,13 +1556,29 @@ def _candidate_cache_dirs_from_config(config: Any | None) -> tuple[str, ...]:
     return tuple(str(path) for path in raw_dirs if str(path).strip())
 
 
-def _explicit_formula_cache_paths(paths: tuple[Path | str, ...] | None) -> list[Path]:
+def _source_artifact_hash(path: Path) -> str:
+    """Return a stable content hash for source provenance, or an empty value."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as file:
+            while chunk := file.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def _explicit_formula_cache_paths(
+    paths: tuple[Path | str, ...] | None,
+    *,
+    cache_path_filter: Callable[[Path], bool] | None = None,
+) -> list[Path]:
     if not paths:
         return []
     found: list[Path] = []
     for raw_path in paths:
         path = Path(raw_path).expanduser()
-        if path.exists() and path.is_file() and _is_formula_cache_path(path):
+        if path.exists() and path.is_file() and (cache_path_filter or _is_formula_cache_path)(path):
             found.append(path)
     return _unique_paths(found)
 
