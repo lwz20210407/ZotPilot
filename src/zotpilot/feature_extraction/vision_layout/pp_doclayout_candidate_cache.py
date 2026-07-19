@@ -16,11 +16,22 @@ from typing import Any
 
 PP_DOCLAYOUT_CACHE_GENERATOR = "pp_doclayout"
 PP_DOCLAYOUT_FORMULA_LABELS = frozenset({"formula", "display_formula", "isolated"})
+PP_DOCLAYOUT_FORMULA_NUMBER_LABELS = frozenset({"formula_number", "equation_number"})
 
 
 @dataclass(frozen=True)
 class PpDocLayoutFormulaRegion:
     """One validated display-formula region in PDF-point coordinates."""
+
+    page_num: int
+    bbox: tuple[float, float, float, float]
+    confidence: float
+    source_artifact_hash: str
+
+
+@dataclass(frozen=True)
+class PpDocLayoutFormulaNumberRegion:
+    """One visual equation-number region, kept separate from formula blocks."""
 
     page_num: int
     bbox: tuple[float, float, float, float]
@@ -59,6 +70,34 @@ def load_pp_doclayout_formula_regions(
             )
         )
     return _dedupe_regions(regions)
+
+
+def load_pp_doclayout_formula_number_regions(
+    pdf_path: Path | str,
+    cache_paths: Iterable[Path | str],
+    *,
+    min_confidence: float = 0.6,
+) -> list[PpDocLayoutFormulaNumberRegion]:
+    """Return visual ``formula_number`` regions from source-bound caches."""
+    if not 0 <= min_confidence <= 1:
+        raise ValueError("min_confidence must be between 0 and 1")
+    source_hash = _sha256(Path(pdf_path))
+    regions: list[PpDocLayoutFormulaNumberRegion] = []
+    for cache_path in sorted({Path(path) for path in cache_paths}, key=lambda path: str(path).lower()):
+        payload = _read_payload(cache_path)
+        if payload is None or not _matches_source_pdf(payload, source_hash):
+            continue
+        artifact_hash = _sha256(cache_path)
+        if not artifact_hash:
+            continue
+        regions.extend(
+            _number_regions_from_payload(
+                payload,
+                artifact_hash=artifact_hash,
+                min_confidence=min_confidence,
+            )
+        )
+    return _dedupe_number_regions(regions)
 
 
 def _read_payload(path: Path) -> Mapping[str, Any] | None:
@@ -120,6 +159,48 @@ def _regions_from_payload(
     return regions
 
 
+def _number_regions_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    artifact_hash: str,
+    min_confidence: float,
+) -> list[PpDocLayoutFormulaNumberRegion]:
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        return []
+    regions: list[PpDocLayoutFormulaNumberRegion] = []
+    for page in pages:
+        if not isinstance(page, Mapping) or str(page.get("coordinate_space", "")).lower() != "pdf":
+            continue
+        page_num = _positive_int(page.get("page_num"))
+        page_size = _page_size(page.get("page_size_pt"))
+        page_regions = page.get("regions")
+        if page_num is None or page_size is None or not isinstance(page_regions, list):
+            continue
+        for region in page_regions:
+            if not isinstance(region, Mapping):
+                continue
+            label = str(region.get("cls", "")).strip().lower().replace(" ", "_")
+            confidence = _confidence(region.get("conf"))
+            bbox = _bbox(region.get("bbox_pt"), page_size)
+            if (
+                label not in PP_DOCLAYOUT_FORMULA_NUMBER_LABELS
+                or confidence is None
+                or confidence < min_confidence
+                or bbox is None
+            ):
+                continue
+            regions.append(
+                PpDocLayoutFormulaNumberRegion(
+                    page_num=page_num,
+                    bbox=bbox,
+                    confidence=confidence,
+                    source_artifact_hash=artifact_hash,
+                )
+            )
+    return regions
+
+
 def _positive_int(value: Any) -> int | None:
     try:
         result = int(value)
@@ -160,6 +241,19 @@ def _bbox(value: Any, page_size: tuple[float, float]) -> tuple[float, float, flo
 
 
 def _dedupe_regions(regions: list[PpDocLayoutFormulaRegion]) -> list[PpDocLayoutFormulaRegion]:
+    unique = {
+        (region.page_num, region.bbox, region.source_artifact_hash): region
+        for region in regions
+    }
+    return sorted(
+        unique.values(),
+        key=lambda region: (region.page_num, region.bbox[1], region.bbox[0], -region.confidence),
+    )
+
+
+def _dedupe_number_regions(
+    regions: list[PpDocLayoutFormulaNumberRegion],
+) -> list[PpDocLayoutFormulaNumberRegion]:
     unique = {
         (region.page_num, region.bbox, region.source_artifact_hash): region
         for region in regions

@@ -296,6 +296,7 @@ class FormulaCandidate:
     bbox_coordinate_space: str = "pdf"
     latex: str = ""
     source_artifact_hash: str = ""
+    quality_flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -803,7 +804,15 @@ class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
         )
         if max_candidates_per_doc > 0:
             candidates = candidates[:max_candidates_per_doc]
-        return _sort_formula_candidates_for_review(candidates)
+        from .vision_layout.equation_number_binding import bind_pp_doclayout_equation_numbers
+
+        binding = bind_pp_doclayout_equation_numbers(
+            pdf_path,
+            candidates,
+            paths,
+            min_confidence=min_confidence,
+        )
+        return _sort_formula_candidates_for_review(list(binding.candidates))
 
 
 def _structured_candidates_complete_for_auto(candidates: list[FormulaCandidate]) -> bool:

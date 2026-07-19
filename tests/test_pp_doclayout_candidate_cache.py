@@ -2,6 +2,7 @@ import hashlib
 import json
 
 from zotpilot.feature_extraction.vision_layout.pp_doclayout_candidate_cache import (
+    load_pp_doclayout_formula_number_regions,
     load_pp_doclayout_formula_regions,
 )
 
@@ -75,3 +76,23 @@ def test_cache_reader_rejects_mismatched_or_out_of_page_coordinates(tmp_path):
     mismatched.write_text(json.dumps(payload), encoding="utf-8")
 
     assert load_pp_doclayout_formula_regions(pdf_path, [cache_path, mismatched]) == []
+
+
+def test_cache_reader_keeps_formula_number_regions_separate_from_formula_blocks(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"pdf")
+    cache_path = tmp_path / "pp_doclayout_layout.json"
+    _write_cache(
+        cache_path,
+        pdf_path,
+        [
+            {"cls": "formula", "bbox_pt": [50, 100, 300, 140], "conf": 0.9},
+            {"cls": "formula_number", "bbox_pt": [500, 100, 530, 140], "conf": 0.91},
+        ],
+    )
+
+    formula_regions = load_pp_doclayout_formula_regions(pdf_path, [cache_path])
+    number_regions = load_pp_doclayout_formula_number_regions(pdf_path, [cache_path])
+
+    assert [region.bbox for region in formula_regions] == [(50.0, 100.0, 300.0, 140.0)]
+    assert [region.bbox for region in number_regions] == [(500.0, 100.0, 530.0, 140.0)]
