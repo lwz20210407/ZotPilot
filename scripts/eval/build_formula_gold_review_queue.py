@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 
 def main() -> int:
@@ -18,6 +19,10 @@ def main() -> int:
         per_document=args.per_document,
         empty_pages_per_document=args.empty_pages_per_document,
     )
+    if (args.image_url_root is None) != (args.image_url_prefix is None):
+        raise ValueError("image-url-root and image-url-prefix must be provided together")
+    if args.image_url_root is not None:
+        queue = rewrite_file_image_urls(queue, args.image_url_root, args.image_url_prefix)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -53,6 +58,31 @@ def build_review_queue(
         selected.extend(row[4] for row in formula_pages[:per_document])
         selected.extend(row[4] for row in empty_pages[:empty_pages_per_document])
     return selected
+
+
+def rewrite_file_image_urls(
+    tasks: list[Mapping[str, Any]],
+    image_url_root: Path | str,
+    image_url_prefix: str | None,
+) -> list[Mapping[str, Any]]:
+    """Replace source-rooted ``file://`` task images with local static URLs."""
+    root = Path(image_url_root).resolve()
+    prefix = str(image_url_prefix or "").rstrip("/")
+    rewritten: list[Mapping[str, Any]] = []
+    for task in tasks:
+        task_copy = dict(task)
+        data = dict(_mapping(task.get("data")))
+        image_url = str(data.get("image", "")).strip()
+        image_path = _file_uri_path(image_url)
+        if image_path is not None:
+            try:
+                relative_path = image_path.resolve().relative_to(root)
+            except ValueError as error:
+                raise ValueError("Task image is outside image-url-root") from error
+            data["image"] = f"{prefix}/{quote(relative_path.as_posix(), safe='/')}"
+        task_copy["data"] = data
+        rewritten.append(task_copy)
+    return rewritten
 
 
 def _prediction_counts(task: Mapping[str, Any]) -> tuple[int, int]:
@@ -99,6 +129,18 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _file_uri_path(value: str) -> Path | None:
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "file":
+        return None
+    path = unquote(parsed.path)
+    if parsed.netloc:
+        return Path(f"//{parsed.netloc}{path}")
+    if len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+    return Path(path)
+
+
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tasks", required=True, help="Label Studio task-export JSON")
@@ -110,6 +152,8 @@ def _arguments() -> argparse.Namespace:
         default=1,
         help="Prediction-empty negative pages selected per source PDF",
     )
+    parser.add_argument("--image-url-root", help="Root directory allowed for file:// image URL rewriting")
+    parser.add_argument("--image-url-prefix", help="Static URL prefix for rewritten task images")
     return parser.parse_args()
 
 
