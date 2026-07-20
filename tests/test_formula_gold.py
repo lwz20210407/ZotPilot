@@ -9,7 +9,12 @@ from zotpilot.feature_extraction.formula_gold import (
     export_label_studio_tasks,
     import_label_studio_gold,
 )
-from zotpilot.feature_extraction.formula_gold_metrics import evaluate_coco_map, evaluate_formula_gold, to_coco
+from zotpilot.feature_extraction.formula_gold_metrics import (
+    evaluate_coco_map,
+    evaluate_formula_gold,
+    evaluate_formula_gold_corpus,
+    to_coco,
+)
 
 
 def _write_pdf(path):
@@ -272,6 +277,63 @@ def test_metrics_select_the_gold_document_bound_to_the_visual_cache_source(tmp_p
 
     assert report["source_pdf_sha256"] == source_hash
     assert report["by_class"]["formula"]["recall"] == 1.0
+
+
+def test_corpus_metrics_aggregate_only_source_bound_item_caches():
+    first_hash = "a" * 64
+    second_hash = "b" * 64
+    gold = {
+        "documents": [
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": first_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [100, 100],
+                        "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30]}],
+                    }
+                ],
+            },
+            {
+                "item_key": "ITEM0002",
+                "source_pdf_sha256": second_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [100, 100],
+                        "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30]}],
+                    }
+                ],
+            },
+        ]
+    }
+    caches = {
+        "ITEM0001": {
+            "generator": "pp_doclayout",
+            "source_pdf_sha256": first_hash,
+            "pages": [{"page_num": 1, "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30], "conf": 1}]}],
+        },
+        "ITEM0002": {
+            "generator": "pp_doclayout",
+            "source_pdf_sha256": second_hash,
+            "pages": [{"page_num": 1, "regions": [{"cls": "formula", "bbox_pt": [50, 50, 70, 70], "conf": 1}]}],
+        },
+    }
+
+    report = evaluate_formula_gold_corpus(gold, caches)
+
+    assert report["document_count"] == 2
+    assert report["overall"] == {
+        "gold_count": 2,
+        "predicted_count": 2,
+        "true_positive": 1,
+        "false_positive": 1,
+        "false_negative": 1,
+        "precision": 0.5,
+        "recall": 0.5,
+    }
+    assert set(report["documents"]) == {"ITEM0001", "ITEM0002"}
 
 
 @pytest.mark.skipif(importlib.util.find_spec("pycocotools") is None, reason="optional validation dependency")

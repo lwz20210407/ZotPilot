@@ -43,6 +43,48 @@ def evaluate_formula_gold(
     }
 
 
+def evaluate_formula_gold_corpus(
+    gold: Mapping[str, Any],
+    caches_by_item_key: Mapping[str, Mapping[str, Any]],
+    *,
+    iou_threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Aggregate source-bound reviewed-Gold metrics across selected documents.
+
+    The caller supplies the explicit ``item_key -> visual cache`` mapping
+    rather than allowing filename matching.  Each row still goes through
+    :func:`evaluate_formula_gold`, which rejects an attachment hash mismatch.
+    This keeps multi-journal benchmark reports from accidentally combining an
+    original PDF annotation with a translated or replaced attachment.
+    """
+    if not caches_by_item_key:
+        raise ValueError("At least one item-keyed visual-layout cache is required")
+    documents = {
+        item_key: evaluate_formula_gold(gold, cache, item_key=item_key, iou_threshold=iou_threshold)
+        for item_key, cache in sorted(caches_by_item_key.items())
+    }
+    reports = list(documents.values())
+    return {
+        "mode": "formula_gold_iou_corpus",
+        "iou_threshold": iou_threshold,
+        "document_count": len(documents),
+        "documents": documents,
+        "overall": _aggregate(report["overall"] for report in reports),
+        "by_class": {
+            label: _aggregate(report["by_class"][label] for report in reports)
+            for label in _CATEGORIES
+        },
+        "formula_latex_coverage": _aggregate_coverage(
+            (report["formula_latex_coverage"] for report in reports),
+            "latex_annotated_count",
+        ),
+        "formula_number_coverage": _aggregate_coverage(
+            (report["formula_number_coverage"] for report in reports),
+            "number_annotated_count",
+        ),
+    }
+
+
 def to_coco(
     gold: Mapping[str, Any],
     cache: Mapping[str, Any],
@@ -371,6 +413,17 @@ def _aggregate(values: Any) -> dict[str, Any]:
         "false_negative": gold_count - true_positive,
         "precision": _ratio(true_positive, predicted_count),
         "recall": _ratio(true_positive, gold_count),
+    }
+
+
+def _aggregate_coverage(rows: Any, annotated_key: str) -> dict[str, Any]:
+    values = list(rows)
+    formula_count = sum(int(row["formula_count"]) for row in values)
+    annotated_count = sum(int(row[annotated_key]) for row in values)
+    return {
+        "formula_count": formula_count,
+        annotated_key: annotated_count,
+        "coverage": _ratio(annotated_count, formula_count),
     }
 
 
