@@ -30,7 +30,7 @@ def _load_traces() -> list[tuple[Path, list[dict[str, Any]]]]:
     traces = []
     for jsonl_path in sorted(INCIDENTS_DIR.glob("*.jsonl")):
         events: list[dict[str, Any]] = []
-        for lineno, raw_line in enumerate(jsonl_path.read_text().splitlines(), 1):
+        for lineno, raw_line in enumerate(jsonl_path.read_text(encoding="utf-8").splitlines(), 1):
             line = raw_line.strip()
             if not line:
                 continue
