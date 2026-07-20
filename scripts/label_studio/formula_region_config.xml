@@ -7,4 +7,7 @@
   <TextArea name="formula_latex" toName="image" editable="true" perRegion="true"
             rows="3" maxSubmissions="1" displayMode="region-list"
             placeholder="Optional reviewed LaTeX for formula regions" />
+  <TextArea name="equation_number" toName="image" editable="true" perRegion="true"
+            rows="1" maxSubmissions="1" displayMode="region-list"
+            placeholder="Optional displayed equation number, e.g. (5.37)" />
 </View>

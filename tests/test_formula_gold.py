@@ -157,6 +157,12 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
                     "type": "textarea",
                     "value": {"text": [r"x = y"]},
                 },
+                {
+                    "from_name": "equation_number",
+                    "parentID": "formula-1",
+                    "type": "textarea",
+                    "value": {"text": ["(1)"]},
+                },
             ],
         }
     ]
@@ -170,10 +176,13 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
     assert report["overall"]["precision"] == 1.0
     assert report["overall"]["recall"] == 1.0
     assert report["formula_latex_coverage"]["latex_coverage"] == 1.0
+    assert report["formula_number_coverage"]["number_coverage"] == 1.0
+    assert report["formula_number_coverage"]["duplicate_numbers"] == []
     assert len(coco_gold["images"]) == 1
     assert len(coco_gold["annotations"]) == 2
     assert len(predictions) == 2
     assert gold["documents"][0]["pages"][0]["regions"][0]["latex"] == r"x = y"
+    assert gold["documents"][0]["pages"][0]["regions"][0]["equation_number"] == "(1)"
 
 
 def test_coco_map_explains_missing_optional_dependency():

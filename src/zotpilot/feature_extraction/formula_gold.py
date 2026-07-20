@@ -184,7 +184,8 @@ def _completed_annotation(value: Any) -> Mapping[str, Any] | None:
 
 def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, float]) -> list[dict[str, Any]]:
     width, height = page_size
-    latex_by_region = _latex_by_region(annotation)
+    latex_by_region = _text_by_region(annotation, "formula_latex")
+    number_by_region = _text_by_region(annotation, "equation_number")
     regions = []
     for result in annotation.get("result", []):
         if not isinstance(result, Mapping) or result.get("type") != "rectanglelabels":
@@ -209,18 +210,18 @@ def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, f
                 "cls": label,
                 "bbox_pt": [round(x, 3), round(y, 3), round(x + region_width, 3), round(y + region_height, 3)],
                 "layout": "unknown",
-                "equation_number": "",
+                "equation_number": number_by_region.get(region_id, "") if label == "formula" else "",
                 "latex": latex_by_region.get(region_id, "") if label == "formula" else "",
             }
         )
     return regions
 
 
-def _latex_by_region(annotation: Mapping[str, Any]) -> dict[str, str]:
-    """Read Label Studio per-region TextArea entries without trusting global text."""
+def _text_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, str]:
+    """Read one Label Studio per-region TextArea without trusting global text."""
     values: dict[str, str] = {}
     for result in annotation.get("result", []):
-        if not isinstance(result, Mapping) or str(result.get("from_name", "")) != "formula_latex":
+        if not isinstance(result, Mapping) or str(result.get("from_name", "")) != from_name:
             continue
         parent_id = _parent_region_id(result)
         text_values = _mapping(result.get("value")).get("text")

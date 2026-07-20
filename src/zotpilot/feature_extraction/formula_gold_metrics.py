@@ -38,6 +38,7 @@ def evaluate_formula_gold(
         "by_class": by_class,
         "overall": _aggregate(by_class.values()),
         "formula_latex_coverage": _formula_latex_coverage(document),
+        "formula_number_coverage": _formula_number_coverage(document),
     }
 
 
@@ -190,6 +191,36 @@ def _formula_latex_coverage(document: Mapping[str, Any]) -> dict[str, Any]:
         "latex_annotated_count": len(annotated),
         "latex_coverage": _ratio(len(annotated), len(formulas)),
         "pages_missing_latex": sorted({page_num for page_num, latex in formulas if not latex}),
+    }
+
+
+def _formula_number_coverage(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Report formula-level number labels required for binding/sequence checks."""
+    formulas = []
+    for page in document.get("pages", []):
+        if not isinstance(page, Mapping):
+            continue
+        page_num = _positive_int(page.get("page_num"))
+        if page_num is None:
+            continue
+        for region in page.get("regions", []):
+            if not isinstance(region, Mapping) or str(region.get("cls", "")).strip() != "formula":
+                continue
+            if _bbox(region.get("bbox_pt")) is None:
+                continue
+            formulas.append((page_num, str(region.get("equation_number", "")).strip()))
+    annotated = [(page_num, number) for page_num, number in formulas if number]
+    duplicate_numbers = sorted(
+        number
+        for number in {number for _, number in annotated}
+        if sum(1 for _, candidate in annotated if candidate == number) > 1
+    )
+    return {
+        "formula_count": len(formulas),
+        "number_annotated_count": len(annotated),
+        "number_coverage": _ratio(len(annotated), len(formulas)),
+        "pages_missing_number": sorted({page_num for page_num, number in formulas if not number}),
+        "duplicate_numbers": duplicate_numbers,
     }
 
 
