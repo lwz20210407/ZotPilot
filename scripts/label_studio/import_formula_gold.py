@@ -8,12 +8,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from zotpilot.feature_extraction.formula_gold import import_label_studio_gold
+from zotpilot.feature_extraction.formula_gold import import_label_studio_gold, summarize_label_studio_review
 
 
 def main() -> int:
     args = _arguments()
     tasks = _json_list(Path(args.tasks))
+    readiness = summarize_label_studio_review(tasks)
+    if readiness["reviewed_task_count"] == 0:
+        raise ValueError("No completed Label Studio reviews found; refusing to create empty Gold JSON")
     gold = import_label_studio_gold(tasks)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +27,7 @@ def main() -> int:
                 "output": str(output),
                 "documents": len(gold["documents"]),
                 "pages": sum(len(document["pages"]) for document in gold["documents"]),
+                "reviewed_tasks": readiness["reviewed_task_count"],
             },
             ensure_ascii=False,
         )
