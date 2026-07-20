@@ -2,11 +2,14 @@ import hashlib
 import json
 
 import pymupdf
+import pytest
 
 from zotpilot.feature_extraction.formula_ocr import FormulaCandidate
 from zotpilot.feature_extraction.vision_layout.equation_number_binding import (
+    EquationNumberBindingResult,
     _equation_number_from_region_text,
     bind_pp_doclayout_equation_numbers,
+    evaluate_equation_number_binding_gold,
 )
 
 
@@ -158,3 +161,70 @@ def test_equation_number_parser_accepts_appendix_numbers_but_not_prose_reference
     assert _equation_number_from_region_text("(A2e)") == "(A2e)"
     assert _equation_number_from_region_text("(A.2e)") == "(A.2e)"
     assert _equation_number_from_region_text("Eq. (2)") == ""
+
+
+def test_number_binding_gold_metrics_distinguish_wrong_missing_and_spurious_numbers():
+    source_hash = "a" * 64
+    result = EquationNumberBindingResult(
+        source_pdf_sha256=source_hash,
+        candidates=(
+            FormulaCandidate(1, (50, 100, 350, 130), "", 0.9, equation_number="(1)"),
+            FormulaCandidate(1, (50, 180, 350, 210), "", 0.9, equation_number="(3)"),
+            FormulaCandidate(1, (50, 260, 350, 290), "", 0.9, equation_number="(9)"),
+        ),
+        bound_numbers=("(1)", "(3)", "(9)"),
+        rejected_number_region_count=0,
+        sequence_gap_numbers=(),
+        duplicate_numbers=(),
+        non_monotonic_pairs=(),
+    )
+    gold = {
+        "documents": [
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": source_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "regions": [
+                            {"cls": "formula", "bbox_pt": [50, 100, 350, 130], "equation_number": "(1)"},
+                            {"cls": "formula", "bbox_pt": [50, 180, 350, 210], "equation_number": "(2)"},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    report = evaluate_equation_number_binding_gold(gold, result, item_key="ITEM0001")
+
+    assert report["true_positive"] == 1
+    assert report["wrong_number_count"] == 1
+    assert report["missing_number_count"] == 0
+    assert report["spurious_number_count"] == 1
+    assert report["precision"] == 1 / 3
+    assert report["recall"] == 1 / 2
+
+
+def test_number_binding_gold_metrics_rejects_a_different_source_attachment():
+    result = EquationNumberBindingResult(
+        source_pdf_sha256="a" * 64,
+        candidates=(),
+        bound_numbers=(),
+        rejected_number_region_count=0,
+        sequence_gap_numbers=(),
+        duplicate_numbers=(),
+        non_monotonic_pairs=(),
+    )
+    gold = {
+        "documents": [
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": "b" * 64,
+                "pages": [],
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="source-PDF"):
+        evaluate_equation_number_binding_gold(gold, result, item_key="ITEM0001")
