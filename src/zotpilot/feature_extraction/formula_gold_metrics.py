@@ -37,6 +37,7 @@ def evaluate_formula_gold(
         "iou_threshold": iou_threshold,
         "by_class": by_class,
         "overall": _aggregate(by_class.values()),
+        "formula_latex_coverage": _formula_latex_coverage(document),
     }
 
 
@@ -166,6 +167,30 @@ def _gold_regions(document: Mapping[str, Any]) -> list[dict[str, Any]]:
             if label in _CATEGORIES and bbox is not None:
                 regions.append({"page_num": page_num, "cls": label, "bbox_pt": bbox})
     return regions
+
+
+def _formula_latex_coverage(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Report whether reviewed boxes are also ready for CDM content evaluation."""
+    formulas = []
+    for page in document.get("pages", []):
+        if not isinstance(page, Mapping):
+            continue
+        page_num = _positive_int(page.get("page_num"))
+        if page_num is None:
+            continue
+        for region in page.get("regions", []):
+            if not isinstance(region, Mapping) or str(region.get("cls", "")).strip() != "formula":
+                continue
+            if _bbox(region.get("bbox_pt")) is None:
+                continue
+            formulas.append((page_num, str(region.get("latex", "")).strip()))
+    annotated = [page_num for page_num, latex in formulas if latex]
+    return {
+        "formula_count": len(formulas),
+        "latex_annotated_count": len(annotated),
+        "latex_coverage": _ratio(len(annotated), len(formulas)),
+        "pages_missing_latex": sorted({page_num for page_num, latex in formulas if not latex}),
+    }
 
 
 def _cache_regions(cache: Mapping[str, Any]) -> list[dict[str, Any]]:

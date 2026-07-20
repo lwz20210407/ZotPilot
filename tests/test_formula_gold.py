@@ -75,6 +75,7 @@ def test_import_recovers_pdf_point_gold_boxes_from_completed_annotation(tmp_path
             "was_cancelled": False,
             "result": [
                 {
+                    "id": "formula-1",
                     "type": "rectanglelabels",
                     "value": {
                         "x": 10,
@@ -97,6 +98,7 @@ def test_import_recovers_pdf_point_gold_boxes_from_completed_annotation(tmp_path
             "bbox_pt": [61.2, 79.2, 306.0, 158.4],
             "layout": "unknown",
             "equation_number": "",
+            "latex": "",
         }
     ]
 
@@ -128,6 +130,7 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
             "was_cancelled": False,
             "result": [
                 {
+                    "id": "formula-1",
                     "type": "rectanglelabels",
                     "value": {
                         "x": 10,
@@ -138,6 +141,7 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
                     },
                 },
                 {
+                    "id": "number-1",
                     "type": "rectanglelabels",
                     "value": {
                         "x": 81.699346,
@@ -146,6 +150,12 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
                         "height": 3.787879,
                         "rectanglelabels": ["formula_number"],
                     },
+                },
+                {
+                    "from_name": "formula_latex",
+                    "parentID": "formula-1",
+                    "type": "textarea",
+                    "value": {"text": [r"x = y"]},
                 },
             ],
         }
@@ -159,9 +169,11 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
     assert report["overall"]["true_positive"] == 2
     assert report["overall"]["precision"] == 1.0
     assert report["overall"]["recall"] == 1.0
+    assert report["formula_latex_coverage"]["latex_coverage"] == 1.0
     assert len(coco_gold["images"]) == 1
     assert len(coco_gold["annotations"]) == 2
     assert len(predictions) == 2
+    assert gold["documents"][0]["pages"][0]["regions"][0]["latex"] == r"x = y"
 
 
 def test_coco_map_explains_missing_optional_dependency():

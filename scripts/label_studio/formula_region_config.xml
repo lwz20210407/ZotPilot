@@ -4,4 +4,7 @@
     <Label value="formula" background="#1F77B4" />
     <Label value="formula_number" background="#D62728" />
   </RectangleLabels>
+  <TextArea name="formula_latex" toName="image" editable="true" perRegion="true"
+            rows="3" maxSubmissions="1" displayMode="region-list"
+            placeholder="Optional reviewed LaTeX for formula regions" />
 </View>

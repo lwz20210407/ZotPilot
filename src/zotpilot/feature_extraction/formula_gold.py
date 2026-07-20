@@ -73,7 +73,7 @@ def write_label_studio_tasks(tasks: Iterable[Mapping[str, Any]], output_path: Pa
 
 
 def import_label_studio_gold(tasks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Convert completed Label Studio rectangle labels into PDF-point gold JSON."""
+    """Convert reviewed regions and optional per-region LaTeX into gold JSON."""
     documents: dict[tuple[str, str], dict[str, Any]] = {}
     for task in tasks:
         data = _mapping(task.get("data"))
@@ -184,6 +184,7 @@ def _completed_annotation(value: Any) -> Mapping[str, Any] | None:
 
 def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, float]) -> list[dict[str, Any]]:
     width, height = page_size
+    latex_by_region = _latex_by_region(annotation)
     regions = []
     for result in annotation.get("result", []):
         if not isinstance(result, Mapping) or result.get("type") != "rectanglelabels":
@@ -202,15 +203,41 @@ def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, f
             continue
         if region_width <= 0 or region_height <= 0:
             continue
+        region_id = str(result.get("id", "")).strip()
         regions.append(
             {
                 "cls": label,
                 "bbox_pt": [round(x, 3), round(y, 3), round(x + region_width, 3), round(y + region_height, 3)],
                 "layout": "unknown",
                 "equation_number": "",
+                "latex": latex_by_region.get(region_id, "") if label == "formula" else "",
             }
         )
     return regions
+
+
+def _latex_by_region(annotation: Mapping[str, Any]) -> dict[str, str]:
+    """Read Label Studio per-region TextArea entries without trusting global text."""
+    values: dict[str, str] = {}
+    for result in annotation.get("result", []):
+        if not isinstance(result, Mapping) or str(result.get("from_name", "")) != "formula_latex":
+            continue
+        parent_id = _parent_region_id(result)
+        text_values = _mapping(result.get("value")).get("text")
+        if not parent_id or not isinstance(text_values, list):
+            continue
+        latex = "\n".join(str(item).strip() for item in text_values if str(item).strip()).strip()
+        if latex:
+            values[parent_id] = latex
+    return values
+
+
+def _parent_region_id(result: Mapping[str, Any]) -> str:
+    for key in ("parentID", "parent_id", "parentId"):
+        value = str(result.get(key, "")).strip()
+        if value:
+            return value
+    return ""
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
