@@ -173,3 +173,27 @@ def test_coco_map_explains_missing_optional_dependency():
         assert "pycocotools" in str(error)
     else:
         raise AssertionError("expected optional dependency error")
+
+
+@pytest.mark.skipif(importlib.util.find_spec("pycocotools") is None, reason="optional validation dependency")
+def test_coco_map_evaluates_a_perfect_prediction():
+    gold = {
+        "images": [{"id": 1, "file_name": "page.png", "width": 100, "height": 100}],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [10, 10, 20, 20],
+                "area": 400,
+                "iscrowd": 0,
+            }
+        ],
+        "categories": [{"id": 1, "name": "formula"}, {"id": 2, "name": "formula_number"}],
+    }
+    predictions = [{"image_id": 1, "category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.99}]
+
+    report = evaluate_coco_map(gold, predictions)
+
+    assert report["map50"] == pytest.approx(1.0)
+    assert report["mar100"] == pytest.approx(1.0)
