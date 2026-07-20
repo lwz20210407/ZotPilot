@@ -22,7 +22,7 @@ def evaluate_formula_gold(
     """Return one-to-one per-class P/R diagnostics for one source-bound PDF."""
     if not 0 < iou_threshold <= 1:
         raise ValueError("iou_threshold must be in (0, 1]")
-    document = _gold_document(gold, item_key)
+    document = _gold_document(gold, item_key, source_pdf_sha256=str(cache.get("source_pdf_sha256", "")))
     _validate_cache_source(cache, document)
     gold_regions = _gold_regions(document)
     predicted_regions = _cache_regions(cache)
@@ -49,7 +49,7 @@ def to_coco(
     item_key: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Convert reviewed gold and PP-DocLayout cache rows to COCO instances."""
-    document = _gold_document(gold, item_key)
+    document = _gold_document(gold, item_key, source_pdf_sha256=str(cache.get("source_pdf_sha256", "")))
     _validate_cache_source(cache, document)
     images = []
     image_ids: dict[int, int] = {}
@@ -128,7 +128,12 @@ def evaluate_coco_map(coco_gold: Mapping[str, Any], predictions: Sequence[Mappin
     }
 
 
-def _gold_document(gold: Mapping[str, Any], item_key: str) -> dict[str, Any]:
+def _gold_document(
+    gold: Mapping[str, Any],
+    item_key: str,
+    *,
+    source_pdf_sha256: str = "",
+) -> dict[str, Any]:
     documents = gold.get("documents")
     if not isinstance(documents, list):
         raise ValueError("gold documents must be a list")
@@ -137,8 +142,15 @@ def _gold_document(gold: Mapping[str, Any], item_key: str) -> dict[str, Any]:
         for document in documents
         if isinstance(document, Mapping) and document.get("item_key") == item_key
     ]
+    source_hash = str(source_pdf_sha256).strip().lower()
+    if source_hash:
+        matches = [
+            document
+            for document in matches
+            if str(document.get("source_pdf_sha256", "")).strip().lower() == source_hash
+        ]
     if len(matches) != 1:
-        raise ValueError(f"gold must contain exactly one document for {item_key}")
+        raise ValueError(f"gold must contain exactly one document for {item_key} and the cache source PDF")
     document = dict(matches[0])
     pages = document.get("pages")
     if not isinstance(pages, list):

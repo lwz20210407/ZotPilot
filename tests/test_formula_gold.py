@@ -196,6 +196,40 @@ def test_coco_map_explains_missing_optional_dependency():
         raise AssertionError("expected optional dependency error")
 
 
+def test_metrics_select_the_gold_document_bound_to_the_visual_cache_source(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "cache.json"
+    _write_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+    source_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    gold = {
+        "documents": [
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": "b" * 64,
+                "pages": [{"page_num": 1, "page_size_pt": [612, 792], "regions": []}],
+            },
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": source_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [612, 792],
+                        "regions": [{"cls": "formula", "bbox_pt": [61.2, 79.2, 306, 158.4]}],
+                    }
+                ],
+            },
+        ]
+    }
+
+    report = evaluate_formula_gold(gold, cache, item_key="ITEM0001")
+
+    assert report["source_pdf_sha256"] == source_hash
+    assert report["by_class"]["formula"]["recall"] == 1.0
+
+
 @pytest.mark.skipif(importlib.util.find_spec("pycocotools") is None, reason="optional validation dependency")
 def test_coco_map_evaluates_a_perfect_prediction():
     gold = {
