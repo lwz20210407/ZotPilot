@@ -201,6 +201,23 @@ def test_review_summary_does_not_count_predictions_as_human_review(tmp_path):
     assert after["layout_annotated_count"] == 1
 
 
+def test_review_summary_warns_when_task_images_use_browser_file_urls(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "cache.json"
+    _write_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+    task = export_label_studio_tasks(pdf_path, cache_path, tmp_path / "images", item_key="ITEM0001")[0]
+
+    report = summarize_label_studio_review([task])
+
+    assert report["browser_file_image_url_task_count"] == 1
+    assert report["review_image_url_ready"] is False
+    task["data"]["image"] = "http://127.0.0.1:8092/images/ITEM0001-0001.png"
+    static_report = summarize_label_studio_review([task])
+    assert static_report["static_http_image_url_task_count"] == 1
+    assert static_report["review_image_url_ready"] is True
+
+
 def test_export_rejects_a_cache_for_a_different_pdf(tmp_path):
     pdf_path = tmp_path / "paper.pdf"
     other_pdf = tmp_path / "other.pdf"

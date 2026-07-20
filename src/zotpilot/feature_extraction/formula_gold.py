@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import pymupdf
 
@@ -158,6 +158,11 @@ def summarize_label_studio_review(tasks: Iterable[Mapping[str, Any]]) -> dict[st
     task_count = 0
     preannotated_task_count = 0
     reviewed_task_count = 0
+    browser_file_image_url_task_count = 0
+    static_http_image_url_task_count = 0
+    label_studio_image_url_task_count = 0
+    missing_image_url_task_count = 0
+    unsupported_image_url_task_count = 0
     reviewed_documents: set[tuple[str, str]] = set()
     formula_region_count = 0
     latex_annotated_count = 0
@@ -167,6 +172,17 @@ def summarize_label_studio_review(tasks: Iterable[Mapping[str, Any]]) -> dict[st
         if not isinstance(task, Mapping):
             continue
         task_count += 1
+        image_url_kind = _review_image_url_kind(_mapping(task.get("data")).get("image"))
+        if image_url_kind == "browser_file":
+            browser_file_image_url_task_count += 1
+        elif image_url_kind == "static_http":
+            static_http_image_url_task_count += 1
+        elif image_url_kind == "label_studio_local":
+            label_studio_image_url_task_count += 1
+        elif image_url_kind == "missing":
+            missing_image_url_task_count += 1
+        else:
+            unsupported_image_url_task_count += 1
         predictions = task.get("predictions")
         if isinstance(predictions, list) and any(isinstance(item, Mapping) for item in predictions):
             preannotated_task_count += 1
@@ -194,6 +210,17 @@ def summarize_label_studio_review(tasks: Iterable[Mapping[str, Any]]) -> dict[st
         "preannotated_task_count": preannotated_task_count,
         "reviewed_task_count": reviewed_task_count,
         "unreviewed_task_count": task_count - reviewed_task_count,
+        "browser_file_image_url_task_count": browser_file_image_url_task_count,
+        "static_http_image_url_task_count": static_http_image_url_task_count,
+        "label_studio_image_url_task_count": label_studio_image_url_task_count,
+        "missing_image_url_task_count": missing_image_url_task_count,
+        "unsupported_image_url_task_count": unsupported_image_url_task_count,
+        "review_image_url_ready": (
+            task_count > 0
+            and browser_file_image_url_task_count == 0
+            and missing_image_url_task_count == 0
+            and unsupported_image_url_task_count == 0
+        ),
         "reviewed_document_count": len(reviewed_documents),
         "formula_region_count": formula_region_count,
         "latex_annotated_count": latex_annotated_count,
@@ -203,6 +230,21 @@ def summarize_label_studio_review(tasks: Iterable[Mapping[str, Any]]) -> dict[st
         "equation_number_coverage": _ratio(equation_number_annotated_count, formula_region_count),
         "layout_coverage": _ratio(layout_annotated_count, formula_region_count),
     }
+
+
+def _review_image_url_kind(value: Any) -> str:
+    """Classify task images without attempting network access in readiness checks."""
+    image_url = str(value or "").strip()
+    if not image_url:
+        return "missing"
+    parsed = urlparse(image_url)
+    if parsed.scheme.lower() == "file":
+        return "browser_file"
+    if parsed.scheme.lower() in {"http", "https"}:
+        return "static_http"
+    if not parsed.scheme and image_url.startswith("/data/local-files/"):
+        return "label_studio_local"
+    return "unsupported"
 
 
 def _read_cache(cache_path: Path | str, pdf_path: Path) -> Mapping[str, Any]:
