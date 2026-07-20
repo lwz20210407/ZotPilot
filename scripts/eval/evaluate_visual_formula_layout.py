@@ -24,7 +24,13 @@ from zotpilot.feature_extraction.vision_layout.pp_doclayout_candidate_cache impo
 def main() -> int:
     args = _arguments()
     cache_paths = tuple(Path(path) for path in args.cache)
+    detector_floor = min(args.min_confidence, 0.5)
     raw_regions = load_pp_doclayout_formula_regions(
+        args.pdf,
+        cache_paths,
+        min_confidence=detector_floor,
+    )
+    strict_regions = load_pp_doclayout_formula_regions(
         args.pdf,
         cache_paths,
         min_confidence=args.min_confidence,
@@ -47,7 +53,9 @@ def main() -> int:
         "pdf": str(args.pdf),
         "cache_paths": [str(path) for path in cache_paths],
         "min_confidence": args.min_confidence,
+        "candidate_detector_floor": detector_floor,
         "raw_formula_region_count": len(raw_regions),
+        "strict_formula_region_count": len(strict_regions),
         "raw_formula_number_region_count": len(number_regions),
         "display_candidate_count": len(candidates),
         "bound_equation_number_count": sum(bool(candidate.equation_number) for candidate in candidates),

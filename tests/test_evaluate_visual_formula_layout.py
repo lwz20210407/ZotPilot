@@ -60,7 +60,9 @@ def test_cli_evaluates_cached_visual_formula_layout_without_model_or_store(tmp_p
     assert result.returncode == 0, result.stderr
     report = json.loads(output_path.read_text(encoding="utf-8"))
     assert report["mode"] == "read_only_pp_doclayout_layout_evaluation"
+    assert report["candidate_detector_floor"] == 0.5
     assert report["raw_formula_region_count"] == 1
+    assert report["strict_formula_region_count"] == 1
     assert report["raw_formula_number_region_count"] == 1
     assert report["display_candidate_count"] == 1
     assert report["bound_equation_number_count"] == 1
