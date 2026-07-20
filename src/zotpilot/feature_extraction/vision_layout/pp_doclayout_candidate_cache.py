@@ -39,6 +39,16 @@ class PpDocLayoutFormulaNumberRegion:
     source_artifact_hash: str
 
 
+@dataclass(frozen=True)
+class PpDocLayoutColumnBlock:
+    """One source-bound page-column block in PDF-point coordinates."""
+
+    page_num: int
+    bbox: tuple[float, float, float, float]
+    source: str
+    source_artifact_hash: str
+
+
 def load_pp_doclayout_formula_regions(
     pdf_path: Path | str,
     cache_paths: Iterable[Path | str],
@@ -98,6 +108,28 @@ def load_pp_doclayout_formula_number_regions(
             )
         )
     return _dedupe_number_regions(regions)
+
+
+def load_pp_doclayout_column_blocks(
+    pdf_path: Path | str,
+    cache_paths: Iterable[Path | str],
+) -> list[PpDocLayoutColumnBlock]:
+    """Return validated cached page columns bound to ``pdf_path``.
+
+    Column blocks are optional derived layout evidence.  Callers must fall
+    back to text projection if no source-bound block cache is available.
+    """
+    source_hash = _sha256(Path(pdf_path))
+    blocks: list[PpDocLayoutColumnBlock] = []
+    for cache_path in sorted({Path(path) for path in cache_paths}, key=lambda path: str(path).lower()):
+        payload = _read_payload(cache_path)
+        if payload is None or not _matches_source_pdf(payload, source_hash):
+            continue
+        artifact_hash = _sha256(cache_path)
+        if not artifact_hash:
+            continue
+        blocks.extend(_column_blocks_from_payload(payload, artifact_hash=artifact_hash))
+    return _dedupe_column_blocks(blocks)
 
 
 def _read_payload(path: Path) -> Mapping[str, Any] | None:
@@ -201,6 +233,40 @@ def _number_regions_from_payload(
     return regions
 
 
+def _column_blocks_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    artifact_hash: str,
+) -> list[PpDocLayoutColumnBlock]:
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        return []
+    blocks: list[PpDocLayoutColumnBlock] = []
+    for page in pages:
+        if not isinstance(page, Mapping) or str(page.get("coordinate_space", "")).lower() != "pdf":
+            continue
+        page_num = _positive_int(page.get("page_num"))
+        page_size = _page_size(page.get("page_size_pt"))
+        page_blocks = page.get("blocks")
+        if page_num is None or page_size is None or not isinstance(page_blocks, list):
+            continue
+        for block in page_blocks:
+            if not isinstance(block, Mapping) or str(block.get("cls", "")).strip().lower() != "column":
+                continue
+            bbox = _bbox(block.get("bbox_pt"), page_size)
+            if bbox is None:
+                continue
+            blocks.append(
+                PpDocLayoutColumnBlock(
+                    page_num=page_num,
+                    bbox=bbox,
+                    source=str(block.get("source", "")).strip(),
+                    source_artifact_hash=artifact_hash,
+                )
+            )
+    return blocks
+
+
 def _positive_int(value: Any) -> int | None:
     try:
         result = int(value)
@@ -261,6 +327,17 @@ def _dedupe_number_regions(
     return sorted(
         unique.values(),
         key=lambda region: (region.page_num, region.bbox[1], region.bbox[0], -region.confidence),
+    )
+
+
+def _dedupe_column_blocks(blocks: list[PpDocLayoutColumnBlock]) -> list[PpDocLayoutColumnBlock]:
+    unique = {
+        (block.page_num, block.bbox, block.source_artifact_hash): block
+        for block in blocks
+    }
+    return sorted(
+        unique.values(),
+        key=lambda block: (block.page_num, block.bbox[0], block.bbox[1], block.bbox[2]),
     )
 
 

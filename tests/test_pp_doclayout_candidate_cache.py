@@ -2,6 +2,7 @@ import hashlib
 import json
 
 from zotpilot.feature_extraction.vision_layout.pp_doclayout_candidate_cache import (
+    load_pp_doclayout_column_blocks,
     load_pp_doclayout_formula_number_regions,
     load_pp_doclayout_formula_regions,
 )
@@ -96,3 +97,31 @@ def test_cache_reader_keeps_formula_number_regions_separate_from_formula_blocks(
 
     assert [region.bbox for region in formula_regions] == [(50.0, 100.0, 300.0, 140.0)]
     assert [region.bbox for region in number_regions] == [(500.0, 100.0, 530.0, 140.0)]
+
+
+def test_cache_reader_returns_source_bound_projection_column_blocks(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"pdf")
+    cache_path = tmp_path / "pp_doclayout_layout.json"
+    _write_cache(cache_path, pdf_path, [])
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["pages"][0]["blocks"] = [
+        {
+            "cls": "column",
+            "bbox_pt": [0, 0, 306, 792],
+            "coordinate_space": "pdf",
+            "source": "zotpilot_text_projection",
+        },
+        {
+            "cls": "column",
+            "bbox_pt": [306, 0, 612, 792],
+            "coordinate_space": "pdf",
+            "source": "zotpilot_text_projection",
+        },
+    ]
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    blocks = load_pp_doclayout_column_blocks(pdf_path, [cache_path])
+
+    assert [block.bbox for block in blocks] == [(0.0, 0.0, 306.0, 792.0), (306.0, 0.0, 612.0, 792.0)]
+    assert all(block.source == "zotpilot_text_projection" for block in blocks)

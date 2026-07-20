@@ -122,3 +122,27 @@ def test_two_column_analysis_allows_outer_margin_fallback_only_without_same_colu
         },
     )
     assert result.bound_numbers == ("(2)",)
+
+
+def test_layout_filter_prefers_source_bound_cached_columns_when_available(tmp_path):
+    pdf_path = tmp_path / "two-column.pdf"
+    cache_path = tmp_path / "layout.json"
+    _write_two_column_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+    numbers = load_pp_doclayout_formula_number_regions(pdf_path, [cache_path])
+    cached_columns = {
+        1: (
+            PageColumn(1, 0, 0, 200),
+            PageColumn(1, 1, 200, 400),
+            PageColumn(1, 2, 400, 612),
+        )
+    }
+
+    analysis = classify_visual_formula_candidates(
+        pdf_path,
+        _visual_candidates(),
+        numbers,
+        cached_columns_by_page=cached_columns,
+    )
+
+    assert analysis.columns_by_page[1] == cached_columns[1]

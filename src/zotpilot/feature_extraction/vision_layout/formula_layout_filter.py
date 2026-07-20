@@ -45,6 +45,7 @@ def classify_visual_formula_candidates(
     *,
     min_confidence: float = 0.6,
     number_assisted_floor: float = 0.5,
+    cached_columns_by_page: Mapping[int, tuple[PageColumn, ...]] | None = None,
 ) -> FormulaLayoutAnalysis:
     """Attach a conservative layout kind and retain only display candidates.
 
@@ -61,10 +62,9 @@ def classify_visual_formula_candidates(
     for region in number_regions:
         number_by_page[region.page_num].append(region)
     words_by_page, page_widths = _page_words(pdf_path)
-    columns_by_page = {
-        page_num: _infer_page_columns(page_num, page_width, words)
-        for page_num, (page_width, words) in words_by_page.items()
-    }
+    columns_by_page = infer_visual_page_columns(pdf_path, words_by_page=words_by_page)
+    if cached_columns_by_page:
+        columns_by_page.update(cached_columns_by_page)
     # Empty-text PDFs can still have visual formula candidates.  Use a single
     # full-width column so the geometry gate remains defined.
     for candidate in original:
@@ -99,6 +99,24 @@ def classify_visual_formula_candidates(
         candidates=tuple(candidate for candidate in classified if candidate.layout_kind == "display"),
         columns_by_page=columns_by_page,
     )
+
+
+def infer_visual_page_columns(
+    pdf_path: Path | str,
+    *,
+    words_by_page: Mapping[int, tuple[float, tuple[tuple[float, float, float, float], ...]]] | None = None,
+) -> dict[int, tuple[PageColumn, ...]]:
+    """Infer reproducible reading columns from a PDF text-layer projection.
+
+    This is the dependency-light fallback for an optional PP-DocBlockLayout
+    model.  Callers can persist the returned columns in a *derived* cache;
+    the original PP-DocLayout detector output remains untouched.
+    """
+    page_words = dict(words_by_page) if words_by_page is not None else _page_words(pdf_path)[0]
+    return {
+        page_num: _infer_page_columns(page_num, page_width, words)
+        for page_num, (page_width, words) in page_words.items()
+    }
 
 
 def _page_words(
