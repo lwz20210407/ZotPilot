@@ -153,6 +153,58 @@ def import_label_studio_gold(tasks: Iterable[Mapping[str, Any]]) -> dict[str, An
     }
 
 
+def summarize_label_studio_review(tasks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Report readiness without confusing predictions with completed review."""
+    task_count = 0
+    preannotated_task_count = 0
+    reviewed_task_count = 0
+    reviewed_documents: set[tuple[str, str]] = set()
+    formula_region_count = 0
+    latex_annotated_count = 0
+    equation_number_annotated_count = 0
+    layout_annotated_count = 0
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        task_count += 1
+        predictions = task.get("predictions")
+        if isinstance(predictions, list) and any(isinstance(item, Mapping) for item in predictions):
+            preannotated_task_count += 1
+        annotation = _completed_annotation(task.get("annotations"))
+        data = _mapping(task.get("data"))
+        meta = _mapping(task.get("meta"))
+        page_size = _page_size(meta.get("page_size_pt"))
+        if annotation is None or page_size is None:
+            continue
+        reviewed_task_count += 1
+        item_key = str(data.get("item_key", "")).strip()
+        source_hash = str(data.get("source_pdf_sha256", "")).strip().lower()
+        if item_key and source_hash:
+            reviewed_documents.add((item_key, source_hash))
+        for region in _annotation_regions(annotation, page_size):
+            if region["cls"] != "formula":
+                continue
+            formula_region_count += 1
+            latex_annotated_count += bool(region["latex"])
+            equation_number_annotated_count += bool(region["equation_number"])
+            layout_annotated_count += region["layout"] in {"display", "inline"}
+    return {
+        "mode": "formula_label_studio_review_readiness",
+        "task_count": task_count,
+        "preannotated_task_count": preannotated_task_count,
+        "reviewed_task_count": reviewed_task_count,
+        "unreviewed_task_count": task_count - reviewed_task_count,
+        "reviewed_document_count": len(reviewed_documents),
+        "formula_region_count": formula_region_count,
+        "latex_annotated_count": latex_annotated_count,
+        "equation_number_annotated_count": equation_number_annotated_count,
+        "layout_annotated_count": layout_annotated_count,
+        "latex_coverage": _ratio(latex_annotated_count, formula_region_count),
+        "equation_number_coverage": _ratio(equation_number_annotated_count, formula_region_count),
+        "layout_coverage": _ratio(layout_annotated_count, formula_region_count),
+    }
+
+
 def _read_cache(cache_path: Path | str, pdf_path: Path) -> Mapping[str, Any]:
     try:
         payload = json.loads(Path(cache_path).read_text(encoding="utf-8"))
@@ -345,6 +397,10 @@ def _confidence(value: Any) -> float | None:
 def _mean(values: Iterable[float]) -> float:
     values = list(values)
     return sum(values) / len(values) if values else 0.0
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
 
 
 def _sha256(path: Path) -> str:

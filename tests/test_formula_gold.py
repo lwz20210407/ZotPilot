@@ -8,6 +8,7 @@ import pytest
 from zotpilot.feature_extraction.formula_gold import (
     export_label_studio_tasks,
     import_label_studio_gold,
+    summarize_label_studio_review,
 )
 from zotpilot.feature_extraction.formula_gold_metrics import (
     evaluate_coco_map,
@@ -142,6 +143,62 @@ def test_import_recovers_pdf_point_gold_boxes_from_completed_annotation(tmp_path
             "latex": "",
         }
     ]
+
+
+def test_review_summary_does_not_count_predictions_as_human_review(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "cache.json"
+    _write_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+    task = export_label_studio_tasks(pdf_path, cache_path, tmp_path / "images", item_key="ITEM0001")[0]
+
+    before = summarize_label_studio_review([task])
+    task["annotations"] = [
+        {
+            "was_cancelled": False,
+            "result": [
+                {
+                    "id": "formula-1",
+                    "type": "rectanglelabels",
+                    "value": {
+                        "x": 10,
+                        "y": 10,
+                        "width": 40,
+                        "height": 10,
+                        "rectanglelabels": ["formula"],
+                    },
+                },
+                {
+                    "from_name": "formula_latex",
+                    "parentID": "formula-1",
+                    "type": "textarea",
+                    "value": {"text": [r"x = y"]},
+                },
+                {
+                    "from_name": "equation_number",
+                    "parentID": "formula-1",
+                    "type": "textarea",
+                    "value": {"text": ["(1)"]},
+                },
+                {
+                    "from_name": "formula_layout",
+                    "parentID": "formula-1",
+                    "type": "choices",
+                    "value": {"choices": ["display"]},
+                },
+            ],
+        }
+    ]
+
+    after = summarize_label_studio_review([task])
+
+    assert before["preannotated_task_count"] == 1
+    assert before["reviewed_task_count"] == 0
+    assert after["reviewed_task_count"] == 1
+    assert after["formula_region_count"] == 1
+    assert after["latex_annotated_count"] == 1
+    assert after["equation_number_annotated_count"] == 1
+    assert after["layout_annotated_count"] == 1
 
 
 def test_export_rejects_a_cache_for_a_different_pdf(tmp_path):
