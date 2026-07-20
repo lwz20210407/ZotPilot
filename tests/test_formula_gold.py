@@ -64,6 +64,41 @@ def test_export_uses_percentage_coordinates_and_keeps_source_hash(tmp_path):
     assert (tmp_path / "images" / "ITEM0001-0001.png").is_file()
 
 
+def test_export_can_use_label_studio_local_file_urls(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "cache.json"
+    _write_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+
+    tasks = export_label_studio_tasks(
+        pdf_path,
+        cache_path,
+        tmp_path / "images",
+        item_key="ITEM0001",
+        label_studio_local_files_root=tmp_path,
+    )
+
+    assert tasks[0]["data"]["image"] == "/data/local-files/?d=images/ITEM0001-0001.png"
+
+
+def test_export_can_use_a_local_static_image_url_prefix(tmp_path):
+    pdf_path = tmp_path / "paper.pdf"
+    cache_path = tmp_path / "cache.json"
+    _write_pdf(pdf_path)
+    _write_cache(cache_path, pdf_path)
+
+    tasks = export_label_studio_tasks(
+        pdf_path,
+        cache_path,
+        tmp_path / "images",
+        item_key="ITEM0001",
+        image_url_root=tmp_path,
+        image_url_prefix="http://127.0.0.1:8092",
+    )
+
+    assert tasks[0]["data"]["image"] == "http://127.0.0.1:8092/images/ITEM0001-0001.png"
+
+
 def test_import_recovers_pdf_point_gold_boxes_from_completed_annotation(tmp_path):
     pdf_path = tmp_path / "paper.pdf"
     cache_path = tmp_path / "cache.json"

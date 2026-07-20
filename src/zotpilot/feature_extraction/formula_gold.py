@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pymupdf
 
@@ -20,12 +21,20 @@ def export_label_studio_tasks(
     *,
     item_key: str,
     dpi: int = 150,
+    label_studio_local_files_root: Path | str | None = None,
+    image_url_root: Path | str | None = None,
+    image_url_prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     """Render pages and export PP-DocLayout predictions as Label Studio tasks.
 
     Boxes are converted from PDF points to Label Studio's percentage coordinate
     system.  The source PDF hash is retained on every task, so annotations from
     a translated or otherwise different attachment cannot silently be reused.
+    When ``label_studio_local_files_root`` is supplied, generated page images
+    use Label Studio's local-files URL instead of a browser ``file://`` URL.
+    ``image_url_root`` and ``image_url_prefix`` instead produce an absolute
+    URL below a caller-managed static server, for Label Studio deployments
+    whose local-files endpoint requires API-header authentication.
     """
     pdf = Path(pdf_path)
     payload = _read_cache(cache_path, pdf)
@@ -46,7 +55,12 @@ def export_label_studio_tasks(
             tasks.append(
                 {
                     "data": {
-                        "image": image_path.resolve().as_uri(),
+                        "image": _label_studio_image_url(
+                            image_path,
+                            label_studio_local_files_root,
+                            image_url_root,
+                            image_url_prefix,
+                        ),
                         "item_key": item_key,
                         "page_num": page_num,
                         "source_pdf_sha256": str(payload["source_pdf_sha256"]),
@@ -62,6 +76,33 @@ def export_label_studio_tasks(
     finally:
         document.close()
     return tasks
+
+
+def _label_studio_image_url(
+    image_path: Path,
+    local_files_root: Path | str | None,
+    image_url_root: Path | str | None,
+    image_url_prefix: str | None,
+) -> str:
+    resolved_image = image_path.resolve()
+    if (image_url_root is None) != (image_url_prefix is None):
+        raise ValueError("image_url_root and image_url_prefix must be provided together")
+    if local_files_root is not None and image_url_root is not None:
+        raise ValueError("Use either Label Studio local-files URLs or a static image URL, not both")
+    if local_files_root is None:
+        if image_url_root is None:
+            return resolved_image.as_uri()
+        relative_path = _relative_image_path(resolved_image, image_url_root)
+        return f"{str(image_url_prefix).rstrip('/')}/{quote(relative_path.as_posix(), safe='/')}"
+    relative_path = _relative_image_path(resolved_image, local_files_root)
+    return f"/data/local-files/?d={quote(relative_path.as_posix(), safe='/')}"
+
+
+def _relative_image_path(image_path: Path, root: Path | str) -> Path:
+    try:
+        return image_path.relative_to(Path(root).resolve())
+    except ValueError as error:
+        raise ValueError("Generated page image is outside the configured image URL root") from error
 
 
 def write_label_studio_tasks(tasks: Iterable[Mapping[str, Any]], output_path: Path | str) -> Path:
