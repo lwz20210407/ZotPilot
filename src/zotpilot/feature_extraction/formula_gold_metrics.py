@@ -7,7 +7,7 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 _CATEGORIES = {"formula": 1, "formula_number": 2}
 
@@ -94,7 +94,7 @@ def to_coco(
     )
 
 
-def evaluate_coco_map(coco_gold: Mapping[str, Any], predictions: list[Mapping[str, Any]]) -> dict[str, float]:
+def evaluate_coco_map(coco_gold: Mapping[str, Any], predictions: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """Evaluate COCO mAP using the optional ``pycocotools`` package.
 
     Keeping this optional makes annotation export usable in lightweight ZotPilot
