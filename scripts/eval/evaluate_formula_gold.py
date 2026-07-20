@@ -13,6 +13,7 @@ from zotpilot.feature_extraction.formula_gold_metrics import (
     evaluate_formula_gold,
     evaluate_formula_gold_corpus,
     to_coco,
+    to_coco_corpus,
 )
 
 
@@ -22,14 +23,16 @@ def main() -> int:
     if args.item_cache:
         if args.cache or args.item_key:
             raise ValueError("Use either --cache/--item-key or repeated --item-cache ITEM_KEY=PATH")
-        if args.coco_map:
-            raise ValueError("--coco-map currently supports one item only; run it per document")
         cache_paths = parse_item_caches(args.item_cache)
+        caches = {item_key: _json_object(cache_path) for item_key, cache_path in cache_paths.items()}
         report = evaluate_formula_gold_corpus(
             gold,
-            {item_key: _json_object(cache_path) for item_key, cache_path in cache_paths.items()},
+            caches,
             iou_threshold=args.iou_threshold,
         )
+        if args.coco_map:
+            coco_gold, predictions = to_coco_corpus(gold, caches)
+            report["coco_map"] = evaluate_coco_map(coco_gold, predictions)
         summary = {
             "output": str(args.output),
             "documents": report["document_count"],

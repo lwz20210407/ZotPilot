@@ -137,6 +137,57 @@ def to_coco(
     )
 
 
+def to_coco_corpus(
+    gold: Mapping[str, Any],
+    caches_by_item_key: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Combine explicitly item-bound Gold/cache pairs into one COCO dataset.
+
+    ``to_coco`` validates each pair independently.  This wrapper only remaps
+    per-document COCO image and annotation IDs to a shared namespace so
+    canonical mAP can be calculated once across the benchmark corpus.
+    """
+    if not caches_by_item_key:
+        raise ValueError("At least one item-keyed visual-layout cache is required")
+    images: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
+    predictions: list[dict[str, Any]] = []
+    next_image_id = 1
+    next_annotation_id = 1
+    for item_key, cache in sorted(caches_by_item_key.items()):
+        document_coco, document_predictions = to_coco(gold, cache, item_key=item_key)
+        image_ids: dict[int, int] = {}
+        for image in document_coco["images"]:
+            original_id = int(image["id"])
+            image_ids[original_id] = next_image_id
+            images.append({**image, "id": next_image_id})
+            next_image_id += 1
+        for annotation in document_coco["annotations"]:
+            annotations.append(
+                {
+                    **annotation,
+                    "id": next_annotation_id,
+                    "image_id": image_ids[int(annotation["image_id"])],
+                }
+            )
+            next_annotation_id += 1
+        predictions.extend(
+            {
+                **prediction,
+                "image_id": image_ids[int(prediction["image_id"])],
+            }
+            for prediction in document_predictions
+        )
+    return (
+        {
+            "images": images,
+            "annotations": annotations,
+            "categories": [{"id": identifier, "name": label} for label, identifier in _CATEGORIES.items()],
+        },
+        predictions,
+    )
+
+
 def evaluate_coco_map(coco_gold: Mapping[str, Any], predictions: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """Evaluate COCO mAP using the optional ``pycocotools`` package.
 

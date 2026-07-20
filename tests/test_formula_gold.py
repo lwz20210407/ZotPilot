@@ -14,6 +14,7 @@ from zotpilot.feature_extraction.formula_gold_metrics import (
     evaluate_formula_gold,
     evaluate_formula_gold_corpus,
     to_coco,
+    to_coco_corpus,
 )
 
 
@@ -334,6 +335,56 @@ def test_corpus_metrics_aggregate_only_source_bound_item_caches():
         "recall": 0.5,
     }
     assert set(report["documents"]) == {"ITEM0001", "ITEM0002"}
+
+
+def test_corpus_coco_uses_unique_images_and_keeps_item_bound_predictions():
+    first_hash = "a" * 64
+    second_hash = "b" * 64
+    gold = {
+        "documents": [
+            {
+                "item_key": "ITEM0001",
+                "source_pdf_sha256": first_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [100, 100],
+                        "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30]}],
+                    }
+                ],
+            },
+            {
+                "item_key": "ITEM0002",
+                "source_pdf_sha256": second_hash,
+                "pages": [
+                    {
+                        "page_num": 1,
+                        "page_size_pt": [100, 100],
+                        "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30]}],
+                    }
+                ],
+            },
+        ]
+    }
+    caches = {
+        "ITEM0001": {
+            "generator": "pp_doclayout",
+            "source_pdf_sha256": first_hash,
+            "pages": [{"page_num": 1, "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30], "conf": 1}]}],
+        },
+        "ITEM0002": {
+            "generator": "pp_doclayout",
+            "source_pdf_sha256": second_hash,
+            "pages": [{"page_num": 1, "regions": [{"cls": "formula", "bbox_pt": [10, 10, 30, 30], "conf": 1}]}],
+        },
+    }
+
+    coco_gold, predictions = to_coco_corpus(gold, caches)
+
+    assert [image["file_name"] for image in coco_gold["images"]] == ["ITEM0001-0001.png", "ITEM0002-0001.png"]
+    assert [image["id"] for image in coco_gold["images"]] == [1, 2]
+    assert [annotation["image_id"] for annotation in coco_gold["annotations"]] == [1, 2]
+    assert [prediction["image_id"] for prediction in predictions] == [1, 2]
 
 
 @pytest.mark.skipif(importlib.util.find_spec("pycocotools") is None, reason="optional validation dependency")
