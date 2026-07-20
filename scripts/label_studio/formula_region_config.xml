@@ -10,4 +10,8 @@
   <TextArea name="equation_number" toName="image" editable="true" perRegion="true"
             rows="1" maxSubmissions="1" displayMode="region-list"
             placeholder="Optional displayed equation number, e.g. (5.37)" />
+  <Choices name="formula_layout" toName="image" perRegion="true" choice="single" showInline="true">
+    <Choice value="display" />
+    <Choice value="inline" />
+  </Choices>
 </View>

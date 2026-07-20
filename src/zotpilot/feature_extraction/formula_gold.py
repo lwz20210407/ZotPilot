@@ -186,6 +186,7 @@ def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, f
     width, height = page_size
     latex_by_region = _text_by_region(annotation, "formula_latex")
     number_by_region = _text_by_region(annotation, "equation_number")
+    layout_by_region = _choices_by_region(annotation, "formula_layout")
     regions = []
     for result in annotation.get("result", []):
         if not isinstance(result, Mapping) or result.get("type") != "rectanglelabels":
@@ -209,7 +210,7 @@ def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, f
             {
                 "cls": label,
                 "bbox_pt": [round(x, 3), round(y, 3), round(x + region_width, 3), round(y + region_height, 3)],
-                "layout": "unknown",
+                "layout": layout_by_region.get(region_id, "unknown") if label == "formula" else "unknown",
                 "equation_number": number_by_region.get(region_id, "") if label == "formula" else "",
                 "latex": latex_by_region.get(region_id, "") if label == "formula" else "",
             }
@@ -230,6 +231,22 @@ def _text_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, 
         latex = "\n".join(str(item).strip() for item in text_values if str(item).strip()).strip()
         if latex:
             values[parent_id] = latex
+    return values
+
+
+def _choices_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, str]:
+    """Read one per-region Label Studio single-choice control."""
+    values: dict[str, str] = {}
+    for result in annotation.get("result", []):
+        if not isinstance(result, Mapping) or str(result.get("from_name", "")) != from_name:
+            continue
+        parent_id = _parent_region_id(result)
+        choices = _mapping(result.get("value")).get("choices")
+        if not parent_id or not isinstance(choices, list) or len(choices) != 1:
+            continue
+        choice = str(choices[0]).strip().lower()
+        if choice in {"display", "inline"}:
+            values[parent_id] = choice
     return values
 
 

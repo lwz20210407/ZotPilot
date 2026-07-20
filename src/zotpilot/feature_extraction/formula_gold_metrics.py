@@ -37,6 +37,7 @@ def evaluate_formula_gold(
         "iou_threshold": iou_threshold,
         "by_class": by_class,
         "overall": _aggregate(by_class.values()),
+        "formula_layout": _formula_layout_metrics(gold_regions, predicted_regions, iou_threshold),
         "formula_latex_coverage": _formula_latex_coverage(document),
         "formula_number_coverage": _formula_number_coverage(document),
     }
@@ -178,7 +179,14 @@ def _gold_regions(document: Mapping[str, Any]) -> list[dict[str, Any]]:
             label = str(region.get("cls", "")).strip().lower().replace(" ", "_")
             bbox = _bbox(region.get("bbox_pt"))
             if label in _CATEGORIES and bbox is not None:
-                regions.append({"page_num": page_num, "cls": label, "bbox_pt": bbox})
+                regions.append(
+                    {
+                        "page_num": page_num,
+                        "cls": label,
+                        "bbox_pt": bbox,
+                        "layout": _layout(region.get("layout")) if label == "formula" else "unknown",
+                    }
+                )
     return regions
 
 
@@ -252,7 +260,13 @@ def _cache_regions(cache: Mapping[str, Any]) -> list[dict[str, Any]]:
             confidence = _score(region.get("conf"))
             if label in _CATEGORIES and bbox is not None and confidence is not None:
                 regions.append(
-                    {"page_num": page_num, "cls": label, "bbox_pt": bbox, "confidence": confidence}
+                    {
+                        "page_num": page_num,
+                        "cls": label,
+                        "bbox_pt": bbox,
+                        "confidence": confidence,
+                        "layout": _layout(region.get("layout")) if label == "formula" else "unknown",
+                    }
                 )
     return regions
 
@@ -272,6 +286,8 @@ def _match_class(
         if region["cls"] == label:
             predicted_by_page[region["page_num"]].append(region)
     matches = []
+    unmatched_gold: list[dict[str, Any]] = []
+    unmatched_predictions: list[dict[str, Any]] = []
     for page_num in sorted(set(gold_by_page) | set(predicted_by_page)):
         candidates = [
             (_iou(gold_region["bbox_pt"], predicted_region["bbox_pt"]), gold_index, predicted_index)
@@ -286,6 +302,16 @@ def _match_class(
             used_gold.add(gold_index)
             used_predicted.add(predicted_index)
             matches.append({"page_num": page_num, "iou": round(iou, 6)})
+        unmatched_gold.extend(
+            {"page_num": page_num, "bbox_pt": list(region["bbox_pt"])}
+            for index, region in enumerate(gold_by_page[page_num])
+            if index not in used_gold
+        )
+        unmatched_predictions.extend(
+            {"page_num": page_num, "bbox_pt": list(region["bbox_pt"]), "confidence": region.get("confidence")}
+            for index, region in enumerate(predicted_by_page[page_num])
+            if index not in used_predicted
+        )
     gold_count = sum(len(rows) for rows in gold_by_page.values())
     predicted_count = sum(len(rows) for rows in predicted_by_page.values())
     true_positive = len(matches)
@@ -298,6 +324,37 @@ def _match_class(
         "precision": _ratio(true_positive, predicted_count),
         "recall": _ratio(true_positive, gold_count),
         "matches": matches,
+        "unmatched_gold": unmatched_gold,
+        "unmatched_predictions": unmatched_predictions,
+    }
+
+
+def _formula_layout_metrics(
+    gold_regions: list[dict[str, Any]],
+    predicted_regions: list[dict[str, Any]],
+    threshold: float,
+) -> dict[str, Any]:
+    """Evaluate display/inline only when both sides provide a layout label."""
+    gold_formula_regions = [region for region in gold_regions if region["cls"] == "formula"]
+    predicted_formula_regions = [region for region in predicted_regions if region["cls"] == "formula"]
+    labels = ("display", "inline")
+    by_layout = {
+        label: _match_class(
+            [dict(region, cls=f"formula_{label}") for region in gold_formula_regions if region["layout"] == label],
+            [
+                dict(region, cls=f"formula_{label}")
+                for region in predicted_formula_regions
+                if region["layout"] == label
+            ],
+            f"formula_{label}",
+            threshold,
+        )
+        for label in labels
+    }
+    return {
+        "gold_labelled_count": sum(region["layout"] in labels for region in gold_formula_regions),
+        "predicted_labelled_count": sum(region["layout"] in labels for region in predicted_formula_regions),
+        "by_layout": by_layout,
     }
 
 
@@ -341,6 +398,11 @@ def _score(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return score if 0 <= score <= 1 else None
+
+
+def _layout(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in {"display", "inline"} else "unknown"
 
 
 def _xywh(bbox: tuple[float, float, float, float]) -> list[float]:
