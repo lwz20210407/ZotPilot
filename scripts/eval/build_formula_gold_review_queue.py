@@ -51,8 +51,8 @@ def build_review_queue(
     selected: list[Mapping[str, Any]] = []
     for _, group in sorted(groups.items()):
         scored = [(*_prediction_counts(task), _page_num(task), index, task) for index, task in group]
-        formula_pages = [row for row in scored if row[0] > 0]
-        empty_pages = [row for row in scored if row[0] == 0]
+        formula_pages = [row for row in scored if row[0] > 0 or row[1] > 0]
+        empty_pages = [row for row in scored if row[0] == 0 and row[1] == 0]
         formula_pages.sort(key=lambda row: (-row[1], -row[0], row[2], row[3]))
         empty_pages.sort(key=lambda row: (row[2], row[3]))
         selected.extend(row[4] for row in formula_pages[:per_document])

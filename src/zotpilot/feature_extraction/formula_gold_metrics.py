@@ -25,7 +25,8 @@ def evaluate_formula_gold(
     document = _gold_document(gold, item_key, source_pdf_sha256=str(cache.get("source_pdf_sha256", "")))
     _validate_cache_source(cache, document)
     gold_regions = _gold_regions(document)
-    predicted_regions = _cache_regions(cache)
+    reviewed_pages = {int(page["page_num"]) for page in document["pages"]}
+    predicted_regions = [region for region in _cache_regions(cache) if region["page_num"] in reviewed_pages]
     by_class = {
         label: _match_class(gold_regions, predicted_regions, label, iou_threshold)
         for label in _CATEGORIES
@@ -35,6 +36,8 @@ def evaluate_formula_gold(
         "item_key": item_key,
         "source_pdf_sha256": document["source_pdf_sha256"],
         "iou_threshold": iou_threshold,
+        "reviewed_page_numbers": sorted(reviewed_pages),
+        "region_metric_scope": "formula_including_inline_and_formula_number_on_reviewed_pages",
         "by_class": by_class,
         "overall": _aggregate(by_class.values()),
         "formula_layout": _formula_layout_metrics(gold_regions, predicted_regions, iou_threshold),
@@ -431,6 +434,23 @@ def _formula_layout_metrics(
     gold_formula_regions = [region for region in gold_regions if region["cls"] == "formula"]
     predicted_formula_regions = [region for region in predicted_regions if region["cls"] == "formula"]
     labels = ("display", "inline")
+    gold_labelled = sum(region["layout"] in labels for region in gold_formula_regions)
+    predicted_labelled = sum(region["layout"] in labels for region in predicted_formula_regions)
+    unavailable_reasons = []
+    if gold_labelled < len(gold_formula_regions):
+        unavailable_reasons.append("gold_formula_layout_missing")
+    if predicted_labelled < len(predicted_formula_regions):
+        unavailable_reasons.append("predicted_formula_layout_missing")
+    coverage = {
+        "available": not unavailable_reasons,
+        "unavailable_reasons": unavailable_reasons,
+        "gold_labelled_count": gold_labelled,
+        "predicted_labelled_count": predicted_labelled,
+        "gold_unknown_count": len(gold_formula_regions) - gold_labelled,
+        "predicted_unknown_count": len(predicted_formula_regions) - predicted_labelled,
+    }
+    if unavailable_reasons:
+        return {**coverage, "by_layout": {}}
     by_layout = {
         label: _match_class(
             [dict(region, cls=f"formula_{label}") for region in gold_formula_regions if region["layout"] == label],
@@ -445,8 +465,7 @@ def _formula_layout_metrics(
         for label in labels
     }
     return {
-        "gold_labelled_count": sum(region["layout"] in labels for region in gold_formula_regions),
-        "predicted_labelled_count": sum(region["layout"] in labels for region in predicted_formula_regions),
+        **coverage,
         "by_layout": by_layout,
     }
 

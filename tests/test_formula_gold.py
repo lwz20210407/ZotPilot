@@ -300,7 +300,9 @@ def test_metrics_match_reviewed_gold_and_export_coco(tmp_path):
     assert report["formula_number_coverage"]["number_coverage"] == 1.0
     assert report["formula_number_coverage"]["duplicate_numbers"] == []
     assert report["formula_layout"]["gold_labelled_count"] == 1
-    assert report["formula_layout"]["by_layout"]["display"]["recall"] == 0.0
+    assert report["formula_layout"]["available"] is False
+    assert report["formula_layout"]["unavailable_reasons"] == ["predicted_formula_layout_missing"]
+    assert report["formula_layout"]["by_layout"] == {}
     assert len(coco_gold["images"]) == 1
     assert len(coco_gold["annotations"]) == 2
     assert len(predictions) == 2

@@ -4,6 +4,27 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+
+@pytest.mark.parametrize("empty_limit, expected_pages", [(0, [1]), (1, [1, 2])])
+def test_number_only_page_uses_positive_quota(tmp_path, empty_limit, expected_pages):
+    tasks_path = tmp_path / "tasks.json"
+    output_path = tmp_path / "queue.json"
+    tasks_path.write_text(json.dumps([
+        _task("ITEM0001", 1, formulas=0, numbers=2),
+        _task("ITEM0001", 2, formulas=0, numbers=0),
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "scripts/eval/build_formula_gold_review_queue.py",
+         "--tasks", str(tasks_path), "--output", str(output_path),
+         "--per-document", "1", "--empty-pages-per-document", str(empty_limit)],
+        cwd=Path(__file__).parents[1], capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    queue = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [task["data"]["page_num"] for task in queue] == expected_pages
+
 
 def test_cli_builds_balanced_formula_gold_review_queue(tmp_path):
     tasks = [
