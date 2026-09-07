@@ -68,7 +68,20 @@ def build_formula_candidate_consensus(candidates: Iterable[Mapping[str, Any]]) -
             clusters.append([row])
         else:
             target.append(row)
-    summaries = [_summarize_cluster(index, cluster) for index, cluster in enumerate(clusters)]
+    conflicting_indices = {
+        int(candidate["candidate_index"])
+        for index, left in enumerate(rows)
+        for right in rows[index + 1:]
+        if _number_conflict(left, right) and _regions_overlap(left, right)
+        for candidate in (left, right)
+    }
+    summaries = [
+        _summarize_cluster(
+            index, cluster,
+            number_conflict=any(candidate["candidate_index"] in conflicting_indices for candidate in cluster),
+        )
+        for index, cluster in enumerate(clusters)
+    ]
     return {
         "mode": "candidate_preview_consensus",
         "preview_candidate_count": len(rows),
@@ -104,7 +117,25 @@ def _candidate_row(index: int, candidate: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _belongs_to_cluster(row: Mapping[str, Any], cluster: list[dict[str, Any]]) -> bool:
+    # An unnumbered region must not bridge two explicitly different numbers.
+    if any(_number_conflict(row, existing) for existing in cluster):
+        return False
     return any(_same_formula(row, existing) for existing in cluster)
+
+
+def _number_conflict(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    left_number = _normalize_number(str(left["equation_number"]))
+    right_number = _normalize_number(str(right["equation_number"]))
+    return (
+        left["page_num"] > 0 and left["page_num"] == right["page_num"]
+        and bool(left_number and right_number) and left_number != right_number
+    )
+
+
+def _regions_overlap(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    left_bbox = left["bbox"]
+    right_bbox = right["bbox"]
+    return len(left_bbox) == 4 and len(right_bbox) == 4 and _bbox_iou(left_bbox, right_bbox) >= 0.3
 
 
 def _same_formula(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
@@ -112,14 +143,14 @@ def _same_formula(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
         return False
     left_number = _normalize_number(str(left["equation_number"]))
     right_number = _normalize_number(str(right["equation_number"]))
-    if left_number and right_number and left_number == right_number:
-        return True
-    left_bbox = left["bbox"]
-    right_bbox = right["bbox"]
-    return len(left_bbox) == 4 and len(right_bbox) == 4 and _bbox_iou(left_bbox, right_bbox) >= 0.3
+    if left_number and right_number:
+        return left_number == right_number
+    return _regions_overlap(left, right)
 
 
-def _summarize_cluster(index: int, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_cluster(
+    index: int, candidates: list[dict[str, Any]], *, number_conflict: bool = False,
+) -> dict[str, Any]:
     source_groups = {str(candidate["source_group"]) for candidate in candidates}
     parser_labels = {str(candidate["parser_label"]) for candidate in candidates if candidate["parser_label"]}
     modalities = {str(candidate["evidence_modality"]) for candidate in candidates}
@@ -132,7 +163,9 @@ def _summarize_cluster(index: int, candidates: list[dict[str, Any]]) -> dict[str
     independent_source_count = len(provenance_keys)
     has_independent_agreement = provider_group_count >= 2 and independent_source_count >= 2
     flags = []
-    if has_independent_agreement:
+    if number_conflict:
+        flags.append("equation_number_conflict")
+    elif has_independent_agreement:
         flags.append("multi_provider_agreement")
     else:
         flags.append("single_provider_only")
@@ -164,6 +197,8 @@ def _summarize_cluster(index: int, candidates: list[dict[str, Any]]) -> dict[str
 
 
 def _cluster_route(flags: list[str]) -> str:
+    if "equation_number_conflict" in flags:
+        return "manual_review"
     if "no_structured_parser_evidence" in flags or "shared_source_artifact" in flags:
         return "single_provider_review"
     if "multi_provider_agreement" in flags:
