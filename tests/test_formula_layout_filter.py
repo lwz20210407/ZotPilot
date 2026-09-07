@@ -100,7 +100,7 @@ def test_number_binding_stays_in_the_same_detected_column(tmp_path):
     assert [candidate.equation_number for candidate in result.candidates] == ["(1)", "(2)"]
 
 
-def test_two_column_analysis_allows_outer_margin_fallback_only_without_same_column_label(tmp_path):
+def test_missing_left_column_number_cannot_borrow_outer_right_column_number(tmp_path):
     pdf_path = tmp_path / "two-column.pdf"
     cache_path = tmp_path / "layout.json"
     _write_two_column_pdf(pdf_path)
@@ -111,8 +111,8 @@ def test_two_column_analysis_allows_outer_margin_fallback_only_without_same_colu
         if not (region["cls"] == "formula_number" and region["bbox_pt"][0] < 400)
     ]
     cache_path.write_text(json.dumps(payload), encoding="utf-8")
-    # A short page-wide display formula can begin in the left margin while its
-    # genuine number is flush with the outer page edge.
+    # The left candidate does not span the gutter. A missing local number
+    # must not give it permission to consume the right-column number.
     result = bind_pp_doclayout_equation_numbers(
         pdf_path,
         [FormulaCandidate(1, (60, 500, 240, 530), "", 0.95, source="pp_doclayout_region")],
@@ -121,7 +121,8 @@ def test_two_column_analysis_allows_outer_margin_fallback_only_without_same_colu
             1: (PageColumn(1, 0, 0, 306), PageColumn(1, 1, 306, 612)),
         },
     )
-    assert result.bound_numbers == ("(2)",)
+    assert result.bound_numbers == ()
+    assert result.candidates[0].equation_number == ""
 
 
 def test_layout_filter_prefers_source_bound_cached_columns_when_available(tmp_path):

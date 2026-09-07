@@ -17,7 +17,7 @@ from pathlib import Path
 import pymupdf
 
 from ..formula_ocr import FormulaCandidate
-from .pp_doclayout_candidate_cache import PpDocLayoutFormulaNumberRegion
+from .pp_doclayout_candidate_cache import PpDocLayoutFormulaNumberRegion, load_pp_doclayout_column_blocks
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,20 @@ class FormulaLayoutAnalysis:
 
     candidates: tuple[FormulaCandidate, ...]
     columns_by_page: Mapping[int, tuple[PageColumn, ...]]
+
+
+def load_visual_page_columns(
+    pdf_path: Path | str, cache_paths: Iterable[Path | str],
+) -> dict[int, tuple[PageColumn, ...]]:
+    """Share validated cached-column ordering between runtime and Gold evaluation."""
+    grouped: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for block in load_pp_doclayout_column_blocks(pdf_path, cache_paths):
+        grouped[block.page_num].append((block.bbox[0], block.bbox[2]))
+    return {
+        page_num: tuple(PageColumn(page_num, index, x0, x1)
+                        for index, (x0, x1) in enumerate(sorted(set(columns))))
+        for page_num, columns in grouped.items()
+    }
 
 
 def classify_visual_formula_candidates(

@@ -173,6 +173,76 @@ class TestFormulaBackfill:
         indexer._config_hash_path.write_text(_config_hash(indexer.config))
         indexer._assert_config_hash_current()
 
+    @pytest.mark.parametrize("numbers, should_block", [([1, 3, 2, 4], False), ([1, 4, 3, 5], True)])
+    def test_pp_doclayout_backfill_uses_real_column_binding_before_ocr(self, tmp_path, numbers, should_block):
+        import hashlib
+
+        import pymupdf
+
+        from zotpilot.indexer import Indexer
+        from zotpilot.models import ExtractedFormula, ZoteroItem
+
+        pdf = tmp_path / "paper.pdf"
+        cache = tmp_path / "pp_doclayout_layout.json"
+        document = pymupdf.open()
+        page = document.new_page(width=612, height=792)
+        regions = []
+        for (x, y, label_x), number in zip([(60, 100, 272), (350, 100, 562),
+                                           (60, 200, 272), (350, 200, 562)], numbers):
+            page.insert_text((x, y + 20), "x = y", fontsize=12)
+            page.insert_text((label_x, y + 20), f"({number})", fontsize=12)
+            regions.extend([
+                {"cls": "formula", "bbox_pt": [x, y, x + 180, y + 30], "conf": 0.95},
+                {"cls": "formula_number", "bbox_pt": [label_x - 2, y, label_x + 30, y + 30], "conf": 0.95},
+            ])
+        document.save(pdf)
+        document.close()
+        source_hash = hashlib.sha256(pdf.read_bytes()).hexdigest()
+        cache.write_text(json.dumps({
+            "generator": "pp_doclayout", "source_pdf_sha256": source_hash,
+            "layout_enrichment": {"generator": "zotpilot_text_projection_columns", "schema_version": 1,
+                                  "source_pdf_sha256": source_hash},
+            "pages": [{"page_num": 1, "page_size_pt": [612, 792], "coordinate_space": "pdf",
+                       "regions": regions, "blocks": [
+                           {"cls": "column", "bbox_pt": [x0, 0, x1, 792], "coordinate_space": "pdf",
+                            "source": "zotpilot_text_projection"} for x0, x1 in [(0, 306), (306, 612)]
+                       ]}],
+        }), encoding="utf-8")
+        item = ZoteroItem("DOC1", "Paper", "Author", 2024, pdf, publication="Journal")
+        indexer = Indexer.__new__(Indexer)
+        indexer.config = self._hash_config()
+        indexer.config.formula_candidate_provider = "pp_doclayout"
+        indexer.store = MagicMock()
+        indexer.store.get_indexed_doc_ids.return_value = {"DOC1"}
+        indexer.zotero = MagicMock()
+        indexer.zotero.get_all_items_with_pdfs.return_value = [item]
+        indexer.zotero.mineru_cache_paths_for_item.return_value = (cache,)
+        indexer.zotero.get_item.return_value = item
+        indexer.journal_ranker = MagicMock()
+        indexer._ensure_formula_provider_available = MagicMock()
+        indexer._assert_config_hash_current = MagicMock()
+
+        def recognize(_item, *, candidates, **_kwargs):
+            assert {c.equation_number for c in candidates} == {f"({n})" for n in numbers}
+            assert all(c.source == "pp_doclayout_region" for c in candidates)
+            assert all(c.equation_number_status == "detected_region" for c in candidates)
+            return [ExtractedFormula(page_num=c.page_num, formula_index=i, bbox=c.bbox,
+                                     latex="x = y", equation_number=c.equation_number)
+                    for i, c in enumerate(candidates)]
+
+        indexer._recognize_formulas_for_item = MagicMock(side_effect=recognize)
+        result = indexer.index_formulas(item_key="DOC1")
+        if should_block:
+            assert result["write_blocked"] is True, result
+            indexer._recognize_formulas_for_item.assert_not_called()
+            indexer.store.replace_formulas.assert_not_called()
+        else:
+            assert result["formulas_indexed"] == 4, result
+            indexer._recognize_formulas_for_item.assert_called_once()
+            indexer.store.replace_formulas.assert_called_once()
+        indexer.store.delete_chunks_by_type.assert_not_called()
+        indexer.store.add_chunks.assert_not_called()
+
     def test_index_formulas_backfills_already_indexed_docs(self, tmp_path):
         from zotpilot.indexer import Indexer
         from zotpilot.models import ExtractedFormula, ZoteroItem

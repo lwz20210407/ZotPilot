@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from zotpilot.feature_extraction.vision_layout.formula_layout_filter import infer_visual_page_columns
+from zotpilot.feature_extraction.vision_layout.pp_doclayout_candidate_cache import (
+    COLUMN_ENRICHMENT_GENERATOR,
+    COLUMN_ENRICHMENT_VERSION,
+)
 
 
 def main() -> int:
@@ -87,7 +91,8 @@ def _with_projection_columns(
         )
         page["blocks"] = blocks
     enriched["layout_enrichment"] = {
-        "generator": "zotpilot_text_projection_columns",
+        "generator": COLUMN_ENRICHMENT_GENERATOR,
+        "schema_version": COLUMN_ENRICHMENT_VERSION,
         "source_pdf_sha256": str(enriched.get("source_pdf_sha256", "")),
     }
     return enriched

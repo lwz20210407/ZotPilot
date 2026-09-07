@@ -17,6 +17,8 @@ from typing import Any
 PP_DOCLAYOUT_CACHE_GENERATOR = "pp_doclayout"
 PP_DOCLAYOUT_FORMULA_LABELS = frozenset({"formula", "display_formula", "isolated"})
 PP_DOCLAYOUT_FORMULA_NUMBER_LABELS = frozenset({"formula_number", "equation_number"})
+COLUMN_ENRICHMENT_GENERATOR = "zotpilot_text_projection_columns"
+COLUMN_ENRICHMENT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -238,6 +240,16 @@ def _column_blocks_from_payload(
     *,
     artifact_hash: str,
 ) -> list[PpDocLayoutColumnBlock]:
+    provenance = payload.get("layout_enrichment")
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("generator") != COLUMN_ENRICHMENT_GENERATOR
+        or type(provenance.get("schema_version")) is not int
+        or provenance.get("schema_version") != COLUMN_ENRICHMENT_VERSION
+        or str(provenance.get("source_pdf_sha256", "")).strip().lower()
+        != str(payload.get("source_pdf_sha256", "")).strip().lower()
+    ):
+        return []
     pages = payload.get("pages")
     if not isinstance(pages, list):
         return []
@@ -252,6 +264,8 @@ def _column_blocks_from_payload(
             continue
         for block in page_blocks:
             if not isinstance(block, Mapping) or str(block.get("cls", "")).strip().lower() != "column":
+                continue
+            if block.get("source") != "zotpilot_text_projection" or block.get("coordinate_space") != "pdf":
                 continue
             bbox = _bbox(block.get("bbox_pt"), page_size)
             if bbox is None:

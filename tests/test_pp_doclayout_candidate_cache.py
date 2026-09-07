@@ -1,6 +1,8 @@
 import hashlib
 import json
 
+import pytest
+
 from zotpilot.feature_extraction.vision_layout.pp_doclayout_candidate_cache import (
     load_pp_doclayout_column_blocks,
     load_pp_doclayout_formula_number_regions,
@@ -119,9 +121,42 @@ def test_cache_reader_returns_source_bound_projection_column_blocks(tmp_path):
             "source": "zotpilot_text_projection",
         },
     ]
+    payload["layout_enrichment"] = {
+        "generator": "zotpilot_text_projection_columns", "schema_version": 1,
+        "source_pdf_sha256": _sha256(pdf_path),
+    }
     cache_path.write_text(json.dumps(payload), encoding="utf-8")
 
     blocks = load_pp_doclayout_column_blocks(pdf_path, [cache_path])
 
     assert [block.bbox for block in blocks] == [(0.0, 0.0, 306.0, 792.0), (306.0, 0.0, 612.0, 792.0)]
     assert all(block.source == "zotpilot_text_projection" for block in blocks)
+
+
+@pytest.mark.parametrize("defect", ["missing", "generator", "version", "source_hash", "block_source", "coordinate"])
+def test_column_reader_rejects_untrusted_or_incompatible_enrichment(tmp_path, defect):
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"pdf")
+    cache_path = tmp_path / "layout.json"
+    _write_cache(cache_path, pdf_path, [])
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    block = {"cls": "column", "bbox_pt": [0, 0, 306, 792],
+             "coordinate_space": "pdf", "source": "zotpilot_text_projection"}
+    provenance = {"generator": "zotpilot_text_projection_columns", "schema_version": 1,
+                  "source_pdf_sha256": _sha256(pdf_path)}
+    payload["pages"][0]["blocks"] = [block]
+    payload["layout_enrichment"] = provenance
+    if defect == "missing":
+        payload.pop("layout_enrichment")
+    elif defect == "generator":
+        provenance["generator"] = "unrelated_producer"
+    elif defect == "version":
+        provenance["schema_version"] = 2
+    elif defect == "source_hash":
+        provenance["source_pdf_sha256"] = "b" * 64
+    elif defect == "block_source":
+        block["source"] = "unrelated_producer"
+    else:
+        block["coordinate_space"] = "pixels"
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert load_pp_doclayout_column_blocks(pdf_path, [cache_path]) == []

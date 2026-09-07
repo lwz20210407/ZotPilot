@@ -28,7 +28,6 @@ import pymupdf
 from .. import providers
 from ..models import ExtractedFormula
 from .vision_layout.pp_doclayout_candidate_cache import (
-    load_pp_doclayout_column_blocks,
     load_pp_doclayout_formula_regions,
 )
 
@@ -803,26 +802,10 @@ class PpDocLayoutFormulaCandidateProvider(MinerUCacheFormulaCandidateProvider):
                 min_confidence=detector_floor,
             )
         ]
-        from .vision_layout.formula_layout_filter import PageColumn, classify_visual_formula_candidates
+        from .vision_layout.formula_layout_filter import classify_visual_formula_candidates, load_visual_page_columns
         from .vision_layout.pp_doclayout_candidate_cache import load_pp_doclayout_formula_number_regions
 
-        cached_columns_by_page: dict[int, list[PageColumn]] = {}
-        for block in load_pp_doclayout_column_blocks(pdf_path, paths):
-            cached_columns_by_page.setdefault(block.page_num, []).append(
-                PageColumn(
-                    page_num=block.page_num,
-                    index=0,
-                    x0=block.bbox[0],
-                    x1=block.bbox[2],
-                )
-            )
-        cached_columns = {
-            page_num: tuple(
-                PageColumn(page_num, index, column.x0, column.x1)
-                for index, column in enumerate(sorted(columns, key=lambda column: (column.x0, column.x1)))
-            )
-            for page_num, columns in cached_columns_by_page.items()
-        }
+        cached_columns = load_visual_page_columns(pdf_path, paths)
         layout = classify_visual_formula_candidates(
             pdf_path,
             candidates,
