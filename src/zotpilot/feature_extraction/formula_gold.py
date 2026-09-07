@@ -356,10 +356,11 @@ def _annotation_regions(annotation: Mapping[str, Any], page_size: tuple[float, f
 def _text_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, str]:
     """Read one Label Studio per-region TextArea without trusting global text."""
     values: dict[str, str] = {}
+    region_ids = _annotation_region_ids(annotation)
     for result in annotation.get("result", []):
         if not isinstance(result, Mapping) or str(result.get("from_name", "")) != from_name:
             continue
-        parent_id = _parent_region_id(result)
+        parent_id = _parent_region_id(result, region_ids)
         text_values = _mapping(result.get("value")).get("text")
         if not parent_id or not isinstance(text_values, list):
             continue
@@ -372,10 +373,11 @@ def _text_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, 
 def _choices_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[str, str]:
     """Read one per-region Label Studio single-choice control."""
     values: dict[str, str] = {}
+    region_ids = _annotation_region_ids(annotation)
     for result in annotation.get("result", []):
         if not isinstance(result, Mapping) or str(result.get("from_name", "")) != from_name:
             continue
-        parent_id = _parent_region_id(result)
+        parent_id = _parent_region_id(result, region_ids)
         choices = _mapping(result.get("value")).get("choices")
         if not parent_id or not isinstance(choices, list) or len(choices) != 1:
             continue
@@ -385,10 +387,23 @@ def _choices_by_region(annotation: Mapping[str, Any], from_name: str) -> dict[st
     return values
 
 
-def _parent_region_id(result: Mapping[str, Any]) -> str:
+def _annotation_region_ids(annotation: Mapping[str, Any]) -> set[str]:
+    return {
+        str(result["id"]).strip()
+        for result in annotation.get("result", [])
+        if isinstance(result, Mapping) and result.get("type") == "rectanglelabels" and result.get("id")
+    }
+
+
+def _parent_region_id(result: Mapping[str, Any], region_ids: set[str]) -> str:
+    # Label Studio per-region controls share the geometry result's id. Older
+    # exports may use a parentID link instead; neither may bind a global note.
+    own_id = str(result.get("id", "")).strip()
+    if own_id in region_ids:
+        return own_id
     for key in ("parentID", "parent_id", "parentId"):
         value = str(result.get(key, "")).strip()
-        if value:
+        if value in region_ids:
             return value
     return ""
 
