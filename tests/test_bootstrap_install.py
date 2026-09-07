@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 RUN_PY = Path(__file__).resolve().parents[1] / "scripts" / "run.py"
 _spec = importlib.util.spec_from_file_location("run_mod", RUN_PY)
 _rm = importlib.util.module_from_spec(_spec)
@@ -187,7 +189,7 @@ class TestMainDelegation:
             return 0
 
         def fake_exit(code):
-            pass
+            raise SystemExit(code)
 
         old_argv = _rm.sys.argv
         old_exit = _rm.sys.exit
@@ -196,7 +198,10 @@ class TestMainDelegation:
             _rm.sys.argv = ["run.py", "register", "--platform", "codex"]
             _rm.sys.exit = fake_exit
             _rm._handle_register = fake_hr
-            _rm.main()
+            with patch.object(_rm.subprocess, "run", side_effect=AssertionError("unexpected subprocess")):
+                with pytest.raises(SystemExit) as exited:
+                    _rm.main()
+                assert exited.value.code == 0
         finally:
             _rm.sys.argv = old_argv
             _rm.sys.exit = old_exit
